@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Side Cabinets – Forma Home (widget dev sandbox)</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: -apple-system, sans-serif; background: #f7f6f2; color: #1a1916; }
+      .fake-header { background: #fff; border-bottom: 1px solid #e5e3dc; padding: 0 24px; height: 60px; display: flex; align-items: center; font-weight: 700; font-size: 18px; position: sticky; top: 0; z-index: 100; }
+      .fake-hero { background: #fff; border-bottom: 1px solid #e5e3dc; padding: 32px 24px; }
+      .fake-hero h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+      .fake-hero p { color: #6b6860; font-size: 15px; }
+      .product-grid-placeholder { display: grid; grid-template-columns: repeat(4,1fr); gap: 20px; padding: 32px 24px; max-width: 1200px; margin: 0 auto; }
+      .product-card-placeholder { background: #fff; border: 1px solid #e5e3dc; border-radius: 10px; overflow: hidden; }
+      .product-card-placeholder__img { background: #f2ede6; aspect-ratio: 1; }
+      .product-card-placeholder__body { padding: 12px 14px; }
+      .product-card-placeholder__title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+      .product-card-placeholder__price { font-size: 15px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <div class="fake-header">✦ Forma Home</div>
+    <div class="fake-hero">
+      <h1>Side Cabinets</h1>
+      <p>Stylish storage for every interior — 12 products</p>
+    </div>
+
+    <!-- Widget mounts here (injected by main.tsx in dev) -->
+    <div id="vir-dev-root"></div>
+
+    <div class="product-grid-placeholder" id="product-grid">
+      <div class="product-card-placeholder"><div class="product-card-placeholder__img"></div><div class="product-card-placeholder__body"><div class="product-card-placeholder__title">Dressoir Lucca</div><div class="product-card-placeholder__price">€290,50</div></div></div>
+      <div class="product-card-placeholder"><div class="product-card-placeholder__img"></div><div class="product-card-placeholder__body"><div class="product-card-placeholder__title">Kast Alaska</div><div class="product-card-placeholder__price">€89,99</div></div></div>
+      <div class="product-card-placeholder"><div class="product-card-placeholder__img"></div><div class="product-card-placeholder__body"><div class="product-card-placeholder__title">Dressoir Saran</div><div class="product-card-placeholder__price">€449,00</div></div></div>
+      <div class="product-card-placeholder"><div class="product-card-placeholder__img"></div><div class="product-card-placeholder__body"><div class="product-card-placeholder__title">Dressoir HELIOS</div><div class="product-card-placeholder__price">€249,00</div></div></div>
+    </div>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
