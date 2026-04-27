@@ -4,7 +4,7 @@ import { Widget } from './Widget'
 import { PDPWidget } from './PDPWidget'
 import { CarouselWidget } from './CarouselWidget'
 import { RecommendationsWidget } from './RecommendationsWidget'
-import { createApi, fetchWidgetConfig, trackWidgetEvent } from './api'
+import { createApi, fetchWidgetConfig, fetchAppearanceSettings, trackWidgetEvent } from './api'
 import { createPDPStore } from './pdpStore'
 
 const currentScript = document.currentScript as HTMLScriptElement | null
@@ -19,9 +19,20 @@ function parsePath() {
 }
 
 // Try to find the collection handle from breadcrumb links on PDP pages
+const GENERIC_HANDLES = new Set(['all', 'frontpage', 'new', 'sale', 'best-sellers', 'featured'])
+
 function inferCollectionHandle(): string {
-  const link = document.querySelector('a[href*="/collections/"]') as HTMLAnchorElement | null
-  return link?.href.match(/\/collections\/([^/?#]+)/)?.[1] ?? ''
+  const links = Array.from(document.querySelectorAll('a[href*="/collections/"]')) as HTMLAnchorElement[]
+  // Prefer breadcrumb links, then any non-generic collection link
+  const sorted = [
+    ...links.filter(l => l.closest('nav, [class*="breadcrumb"], [aria-label*="breadcrumb" i]')),
+    ...links,
+  ]
+  for (const link of sorted) {
+    const handle = link.href.match(/\/collections\/([^/?#]+)/)?.[1]
+    if (handle && !GENERIC_HANDLES.has(handle)) return handle
+  }
+  return ''
 }
 
 // Find or create a mount point inside the product image carousel.
@@ -68,7 +79,11 @@ async function init() {
 
   const collectionName = currentScript?.dataset.collectionName
     ?? (isPDP
-      ? (document.querySelector('a[href*="/collections/"]') as HTMLAnchorElement | null)?.innerText?.trim()
+      ? Array.from(document.querySelectorAll('a[href*="/collections/"]'))
+          .find((l): l is HTMLAnchorElement => {
+            const h = (l as HTMLAnchorElement).href.match(/\/collections\/([^/?#]+)/)?.[1]
+            return !!h && !GENERIC_HANDLES.has(h)
+          })?.innerText?.trim()
       : (document.querySelector('h1') as HTMLElement | null)?.innerText?.trim())
     ?? collectionHandle
 
@@ -80,7 +95,10 @@ async function init() {
     return
   }
 
-  const config = await fetchWidgetConfig(backofficeUrl, shopDomain, collectionHandle)
+  const [config, appearance] = await Promise.all([
+    fetchWidgetConfig(backofficeUrl, shopDomain, collectionHandle),
+    fetchAppearanceSettings(backofficeUrl, shopDomain),
+  ])
 
   if (isPDP) {
     if (!config.pdpCtaEnabled && !config.pdpCarouselEnabled && !config.pdpRecommendationsEnabled) return
@@ -88,7 +106,16 @@ async function init() {
     trackWidgetEvent(backofficeUrl, 'pdp_viewed', { shopDomain, surface: 'pdp' })
 
     const api = createApi(backofficeUrl)
-    const store = createPDPStore(api, productHandle, productTitle)
+    const store = createPDPStore(api, productHandle, productTitle, shopDomain)
+
+    const virJobId = new URLSearchParams(window.location.search).get('vir_job_id')
+    if (virJobId) {
+      try {
+        const renderJob = await api.getRenderJob(virJobId)
+        const brief = await api.getSceneBrief(renderJob.briefId)
+        store.hydrate(brief, renderJob)
+      } catch { /* silent — show normal setup UI */ }
+    }
 
     if (config.pdpCtaEnabled) {
       const container = document.createElement('div')
@@ -99,13 +126,13 @@ async function init() {
         const h1 = document.querySelector('h1')
         h1?.insertAdjacentElement('afterend', container) ?? document.body.prepend(container)
       }
-      mount(container, createElement(PDPWidget, { api, store, collectionHandle, collectionName: collectionName ?? collectionHandle, productTitle, backofficeUrl, shopDomain }))
+      mount(container, createElement(PDPWidget, { api, store, collectionHandle, collectionName: collectionName ?? collectionHandle, productTitle, backofficeUrl, shopDomain, appearance }))
     }
 
     if (config.pdpCarouselEnabled) {
       const slot = findCarouselSlot()
       if (slot) {
-        mount(slot, createElement(CarouselWidget, { api, store, collectionName: collectionName ?? collectionHandle, productTitle, backofficeUrl, shopDomain }))
+        mount(slot, createElement(CarouselWidget, { api, store, collectionName: collectionName ?? collectionHandle, productTitle, backofficeUrl, shopDomain, appearance }))
       } else {
         console.warn('[VIR] Carousel slot not found — add <div data-vir-carousel-slot> to your theme carousel template')
       }
@@ -113,17 +140,21 @@ async function init() {
 
     if (config.pdpRecommendationsEnabled) {
       const container = document.createElement('div')
-      // Insert before "related products" section or before the footer
-      const related = document.querySelector(
-        '.product-recommendations, [data-vir-rec-target], .related-products, footer'
+      // Insert AFTER Shopify's related-products section so VIR appears below it,
+      // not before it (which would put it above the fold and invisible on scroll-down).
+      const related = document.querySelector<HTMLElement>(
+        '[data-vir-rec-target], .product-recommendations, .related-products'
       )
-      if (related?.parentNode) {
-        related.parentNode.insertBefore(container, related)
+      const mainEl = document.querySelector<HTMLElement>('main, [role="main"], #MainContent')
+      if (related) {
+        related.insertAdjacentElement('afterend', container)
+      } else if (mainEl) {
+        mainEl.appendChild(container)
       } else {
         document.body.appendChild(container)
       }
       mount(container, createElement(RecommendationsWidget, {
-        api, store, productHandle, collectionName: collectionName ?? collectionHandle,
+        api, store, productHandle, collectionHandle, shopDomain, collectionName: collectionName ?? collectionHandle, appearance,
       }))
     }
   } else {
@@ -138,7 +169,7 @@ async function init() {
     } else {
       document.body.prepend(container)
     }
-    mount(container, createElement(Widget, { backofficeUrl, collectionHandle, collectionName: collectionName ?? collectionHandle }))
+    mount(container, createElement(Widget, { backofficeUrl, collectionHandle, collectionName: collectionName ?? collectionHandle, appearance }))
   }
 }
 

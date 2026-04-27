@@ -14,6 +14,8 @@ export const WIDGET_CSS = `
 
 /* ── Variables ── */
 .vir-widget {
+  --vir-accent: #2563EB;
+  --vir-accent-text: #ffffff;
   --vir-bg: #F7F6F2;
   --vir-surface: #FFFFFF;
   --vir-border: #E5E3DC;
@@ -47,7 +49,18 @@ export const WIDGET_CSS = `
   margin: 24px;
 }
 
-.vir-widget .vir-cta__icon { font-size: 22px; color: var(--vir-blue); flex-shrink: 0; }
+.vir-widget .vir-cta__icon { font-size: 22px; color: var(--vir-accent); flex-shrink: 0; }
+
+.vir-widget .vir-cta__btn {
+  padding: 8px 16px;
+  background: var(--vir-accent);
+  color: var(--vir-accent-text);
+  border: none; border-radius: var(--vir-r);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; font-family: inherit;
+  transition: opacity 0.15s;
+}
+.vir-widget .vir-cta__btn:hover { opacity: 0.88; }
 
 .vir-widget .vir-cta__text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .vir-widget .vir-cta__text strong { font-size: 14px; font-weight: 700; }
@@ -414,7 +427,7 @@ export const WIDGET_CSS = `
 .vir-widget .vir-rec__title-group { display: flex; flex-direction: column; gap: 3px; }
 .vir-widget .vir-rec__title { font-size: 16px; font-weight: 700; }
 .vir-widget .vir-rec__room-tag {
-  font-size: 11px; color: var(--vir-blue); font-weight: 600; letter-spacing: 0.01em;
+  font-size: 11px; color: var(--vir-accent); font-weight: 600; letter-spacing: 0.01em;
 }
 .vir-widget .vir-rec__nav { display: flex; gap: 6px; }
 .vir-widget .vir-rec__arrow {
@@ -425,21 +438,26 @@ export const WIDGET_CSS = `
 }
 .vir-widget .vir-rec__arrow:hover { border-color: var(--vir-text); background: var(--vir-bg); }
 .vir-widget .vir-rec__strip {
-  display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory;
+  display: grid; grid-auto-flow: column;
+  grid-auto-columns: calc((100% - 36px) / 4);
+  gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory;
   scroll-behavior: smooth; -webkit-overflow-scrolling: touch;
-  padding-bottom: 4px;
-  /* Hide scrollbar */
-  scrollbar-width: none;
+  padding-bottom: 4px; scrollbar-width: none;
 }
 .vir-widget .vir-rec__strip::-webkit-scrollbar { display: none; }
 .vir-widget .vir-rec__card {
-  flex: 0 0 180px; scroll-snap-align: start;
+  scroll-snap-align: start;
   display: flex; flex-direction: column; gap: 8px;
+  text-decoration: none; color: inherit; cursor: pointer;
+}
+.vir-widget .vir-rec__card:hover .vir-rec__card-img {
+  border-color: var(--vir-accent);
 }
 .vir-widget .vir-rec__card-img {
-  position: relative; width: 180px; height: 180px;
+  position: relative; width: 100%; aspect-ratio: 4 / 3;
   border-radius: var(--vir-r-sm); overflow: hidden;
   background: var(--vir-bg); border: 1px solid var(--vir-border);
+  transition: border-color 0.15s;
 }
 .vir-widget .vir-rec__product-img {
   width: 100%; height: 100%; object-fit: cover; display: block;
@@ -460,7 +478,7 @@ export const WIDGET_CSS = `
 }
 .vir-widget .vir-rec__room-badge {
   position: absolute; bottom: 6px; left: 6px;
-  background: rgba(255,255,255,0.92); color: var(--vir-blue);
+  background: rgba(255,255,255,0.92); color: var(--vir-accent);
   font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px;
   letter-spacing: 0.01em;
 }

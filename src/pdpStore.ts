@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { EnhancedSceneBrief } from './types'
 import type { Api, RenderJob } from './api'
 import { isTerminalStatus } from './api'
+import { renderCache } from './renderCache'
 
 export interface PDPSnapshot {
   brief: EnhancedSceneBrief | null
@@ -12,7 +13,7 @@ export type PDPStore = ReturnType<typeof createPDPStore>
 
 // Central state for a PDP page — shared between PDPWidget (CTA bar) and
 // CarouselWidget so both stay in sync and only one render job is created.
-export function createPDPStore(api: Api, productHandle: string, productTitle: string) {
+export function createPDPStore(api: Api, productHandle: string, productTitle: string, shopDomain: string) {
   let state: PDPSnapshot = { brief: null, renderJob: null }
   let activeBriefId: string | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -42,16 +43,26 @@ export function createPDPStore(api: Api, productHandle: string, productTitle: st
 
     if (!brief) return
 
+    const cached = renderCache.get(productHandle, brief.id)
+    if (cached) {
+      state = { brief, renderJob: cached }
+      notify()
+      return
+    }
+
     try {
       const job = await api.createRenderJob({
         briefId: brief.id,
         productId: productHandle,
+        shopDomain,
         product: { title: productTitle, material: '', cabinetColor: '' },
       })
       state = { ...state, renderJob: job }
       notify()
 
-      if (!isTerminalStatus(job.status)) {
+      if (job.status === 'succeeded') {
+        renderCache.set(productHandle, brief.id, job)
+      } else if (!isTerminalStatus(job.status)) {
         pollTimer = setInterval(async () => {
           try {
             const updated = await api.getRenderJob(job.jobId)
@@ -60,12 +71,35 @@ export function createPDPStore(api: Api, productHandle: string, productTitle: st
             if (isTerminalStatus(updated.status)) {
               clearInterval(pollTimer!)
               pollTimer = null
+              if (updated.status === 'succeeded') renderCache.set(productHandle, brief.id, updated)
             }
           } catch { /* ignore */ }
         }, 3000)
       }
     } catch (err) {
       console.error('[VIR] createRenderJob failed:', err)
+    }
+  }
+
+  function hydrate(brief: EnhancedSceneBrief, renderJob: RenderJob) {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+    activeBriefId = brief.id
+    state = { brief, renderJob }
+    notify()
+    if (renderJob.status === 'succeeded') {
+      renderCache.set(productHandle, brief.id, renderJob)
+    } else if (!isTerminalStatus(renderJob.status)) {
+      pollTimer = setInterval(async () => {
+        try {
+          const updated = await api.getRenderJob(renderJob.jobId)
+          state = { ...state, renderJob: updated }
+          notify()
+          if (isTerminalStatus(updated.status)) {
+            clearInterval(pollTimer!); pollTimer = null
+            if (updated.status === 'succeeded') renderCache.set(productHandle, brief.id, updated)
+          }
+        } catch { /* ignore */ }
+      }, 3000)
     }
   }
 
@@ -76,5 +110,5 @@ export function createPDPStore(api: Api, productHandle: string, productTitle: st
     notify()
   }
 
-  return { usePDPStore, setBrief, clear }
+  return { usePDPStore, setBrief, hydrate, clear }
 }

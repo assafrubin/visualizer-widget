@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import type { CollectionSceneBrief, EnhancedSceneBrief, WidgetProduct } from './types'
 import { createApi, fetchShopifyProducts, isTerminalStatus } from './api'
-import type { RenderJob } from './api'
+import type { RenderJob, AppearanceSettings } from './api'
+import { DEFAULT_APPEARANCE } from './api'
 import { WIDGET_CSS } from './styles'
 import { useSetupFlow } from './setup/useSetupFlow'
 import { SetupModal } from './setup/SetupModal'
@@ -12,9 +13,10 @@ export interface WidgetProps {
   backofficeUrl: string
   collectionHandle: string
   collectionName: string
+  appearance?: AppearanceSettings
 }
 
-export function Widget({ backofficeUrl, collectionHandle, collectionName }: WidgetProps) {
+export function Widget({ backofficeUrl, collectionHandle, collectionName, appearance = DEFAULT_APPEARANCE }: WidgetProps) {
   const api = useRef(createApi(backofficeUrl)).current
   const [products, setProducts] = useState<WidgetProduct[]>([])
   const [sceneBrief, setSceneBrief] = useState<EnhancedSceneBrief | null>(() => {
@@ -90,19 +92,21 @@ export function Widget({ backofficeUrl, collectionHandle, collectionName }: Widg
 
   const { isOpen, ...modalProps } = bindings
 
+  const cssVars = { '--vir-accent': appearance.accentColor, '--vir-accent-text': appearance.accentTextColor } as React.CSSProperties
+
   return (
-    <div className="vir-widget">
+    <div className="vir-widget" style={cssVars}>
       <style>{WIDGET_CSS}</style>
 
       {!inRoomMode && (
         <div className="vir-cta">
           <div className="vir-cta__icon">✦</div>
           <div className="vir-cta__text">
-            <strong>See these in your room</strong>
-            <span>Visualize any piece in your actual space — free, instant preview</span>
+            <strong>{appearance.collectionCtaHeading}</strong>
+            <span>{appearance.collectionCtaSubtext}</span>
           </div>
           <button className="vir-cta__btn" onClick={openSetup}>
-            Get started
+            {appearance.collectionCtaButton}
           </button>
         </div>
       )}

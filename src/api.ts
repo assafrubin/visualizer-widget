@@ -1,5 +1,41 @@
 import type { RoomProfile, DetectedZone, QuickActionId, EnhancedSceneBrief, WidgetProduct } from './types'
 
+export interface AppearanceSettings {
+  accentColor: string
+  accentTextColor: string
+  collectionCtaHeading: string
+  collectionCtaSubtext: string
+  collectionCtaButton: string
+  pdpCtaHeading: string
+  pdpCtaSubtext: string
+  pdpCtaButton: string
+  recsTitle: string
+  recsRoomBadge: string
+}
+
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  accentColor: '#2563EB',
+  accentTextColor: '#ffffff',
+  collectionCtaHeading: 'See these in your room',
+  collectionCtaSubtext: 'Visualize any piece in your actual space — free, instant preview',
+  collectionCtaButton: 'Get started',
+  pdpCtaHeading: 'See this in your room',
+  pdpCtaSubtext: 'Free instant preview — no app needed',
+  pdpCtaButton: 'Try it',
+  recsTitle: 'You may also like',
+  recsRoomBadge: 'In your room',
+}
+
+export async function fetchAppearanceSettings(backofficeUrl: string, shopDomain: string): Promise<AppearanceSettings> {
+  try {
+    const res = await fetch(`${backofficeUrl}/api/public/appearance?shop=${encodeURIComponent(shopDomain)}`)
+    if (!res.ok) return { ...DEFAULT_APPEARANCE }
+    return { ...DEFAULT_APPEARANCE, ...await res.json() as Partial<AppearanceSettings> }
+  } catch {
+    return { ...DEFAULT_APPEARANCE }
+  }
+}
+
 export interface RenderJob {
   jobId: string
   briefId: string
@@ -22,6 +58,15 @@ export function createApi(baseUrl: string) {
     return res.json() as Promise<T>
   }
 
+  // Relative imageUrl values from the server must be resolved against baseUrl,
+  // since the widget runs on the merchant's Shopify domain, not the API host.
+  function resolveJob(job: RenderJob): RenderJob {
+    if (job.imageUrl && job.imageUrl.startsWith('/')) {
+      return { ...job, imageUrl: `${baseUrl}${job.imageUrl}` }
+    }
+    return job
+  }
+
   return {
     getRooms: () =>
       req<{ rooms: RoomProfile[] }>('/rooms').then(r => r.rooms),
@@ -34,16 +79,19 @@ export function createApi(baseUrl: string) {
       req<{ zones: DetectedZone[] }>(`/rooms/${roomId}/analysis`, { method: 'POST' })
         .then(r => r.zones),
 
+    getSceneBrief: (briefId: string) =>
+      req<{ brief: EnhancedSceneBrief }>(`/scene-briefs/${briefId}`).then(r => r.brief),
+
     createSceneBrief: (body: { roomId: string; actionId: QuickActionId; refinementText: string; collectionName: string }) =>
       req<{ brief: EnhancedSceneBrief }>('/scene-briefs', { method: 'POST', body: JSON.stringify(body) })
         .then(r => r.brief),
 
-    createRenderJob: (body: { briefId: string; productId: string; product: { title: string; material: string; cabinetColor: string } }) =>
+    createRenderJob: (body: { briefId: string; productId: string; shopDomain?: string; product: { title: string; material: string; cabinetColor: string } }) =>
       req<{ job: RenderJob }>('/render-jobs', { method: 'POST', body: JSON.stringify(body) })
-        .then(r => r.job),
+        .then(r => resolveJob(r.job)),
 
     getRenderJob: (jobId: string) =>
-      req<{ job: RenderJob }>(`/render-jobs/${jobId}`).then(r => r.job),
+      req<{ job: RenderJob }>(`/render-jobs/${jobId}`).then(r => resolveJob(r.job)),
   }
 }
 

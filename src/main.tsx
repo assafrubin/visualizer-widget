@@ -11,7 +11,7 @@ const mode = new URLSearchParams(window.location.search).get('mode')
 
 function PDPDevSandbox() {
   const api = useRef(createApi('http://localhost:3002')).current
-  const store = useRef(createPDPStore(api, 'dressoir-lucca', 'Dressoir Lucca')).current
+  const store = useRef(createPDPStore(api, 'dressoir-lucca', 'Dressoir Lucca', 'dev.myshopify.com')).current
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'grid', gridTemplateColumns: (mode === 'all' || mode === 'carousel') ? '1fr 200px' : '1fr', gap: 24, alignItems: 'start' }}>
@@ -42,6 +42,8 @@ function PDPDevSandbox() {
           api={api}
           store={store}
           productHandle="dressoir-lucca"
+          collectionHandle="side-cabinets"
+          shopDomain="dev.myshopify.com"
           collectionName="Side Cabinets"
         />
       )}

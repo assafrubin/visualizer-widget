@@ -1,7 +1,7 @@
 import type { CollectionSceneBrief } from './types'
 import type { PDPStore } from './pdpStore'
-import type { Api } from './api'
-import { trackWidgetEvent } from './api'
+import type { Api, AppearanceSettings } from './api'
+import { trackWidgetEvent, DEFAULT_APPEARANCE } from './api'
 import { WIDGET_CSS } from './styles'
 import { useSetupFlow } from './setup/useSetupFlow'
 import { SetupModal } from './setup/SetupModal'
@@ -17,9 +17,10 @@ export interface PDPWidgetProps {
   productTitle: string
   backofficeUrl: string
   shopDomain: string
+  appearance?: AppearanceSettings
 }
 
-export function PDPWidget({ api, store, collectionHandle, collectionName, productTitle, backofficeUrl, shopDomain }: PDPWidgetProps) {
+export function PDPWidget({ api, store, collectionHandle, collectionName, productTitle, backofficeUrl, shopDomain, appearance = DEFAULT_APPEARANCE }: PDPWidgetProps) {
   const { brief, renderJob } = store.usePDPStore()
 
   const track = (eventType: Parameters<typeof trackWidgetEvent>[1]) =>
@@ -50,18 +51,20 @@ export function PDPWidget({ api, store, collectionHandle, collectionName, produc
     window.location.href = `/collections/${collectionHandle}`
   }
 
+  const cssVars = { '--vir-accent': appearance.accentColor, '--vir-accent-text': appearance.accentTextColor } as React.CSSProperties
+
   return (
-    <div className="vir-widget">
+    <div className="vir-widget" style={cssVars}>
       <style>{WIDGET_CSS}</style>
 
       {!brief ? (
         <div className="vir-cta">
           <div className="vir-cta__icon">✦</div>
           <div className="vir-cta__text">
-            <strong>See this in your room</strong>
-            <span>Free instant preview — no app needed</span>
+            <strong>{appearance.pdpCtaHeading}</strong>
+            <span>{appearance.pdpCtaSubtext}</span>
           </div>
-          <button className="vir-cta__btn" onClick={() => { track('setup_opened'); openSetup() }}>Try it</button>
+          <button className="vir-cta__btn" onClick={() => { track('setup_opened'); openSetup() }}>{appearance.pdpCtaButton}</button>
         </div>
       ) : (
         <>

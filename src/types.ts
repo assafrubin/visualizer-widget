@@ -46,6 +46,7 @@ export type SetupStep = 'room-select' | 'actions'
 
 export interface WidgetProduct {
   id: string
+  handle: string
   title: string
   price: string
   material: string
@@ -76,6 +77,7 @@ export function mapShopifyProduct(p: ShopifyApiProduct): WidgetProduct {
     || 'Storage cabinet'
   return {
     id: String(p.id),
+    handle: p.handle,
     title: p.title,
     price: p.variants[0]?.price ?? '0',
     material,

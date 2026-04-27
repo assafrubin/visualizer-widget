@@ -1,7 +1,7 @@
 import type { CollectionSceneBrief } from './types'
 import type { PDPStore } from './pdpStore'
-import type { Api } from './api'
-import { trackWidgetEvent } from './api'
+import type { Api, AppearanceSettings } from './api'
+import { trackWidgetEvent, DEFAULT_APPEARANCE } from './api'
 import { WIDGET_CSS } from './styles'
 import { useSetupFlow } from './setup/useSetupFlow'
 import { SetupModal } from './setup/SetupModal'
@@ -13,9 +13,10 @@ export interface CarouselWidgetProps {
   productTitle: string
   backofficeUrl: string
   shopDomain: string
+  appearance?: AppearanceSettings
 }
 
-export function CarouselWidget({ api, store, collectionName, productTitle, backofficeUrl, shopDomain }: CarouselWidgetProps) {
+export function CarouselWidget({ api, store, collectionName, productTitle, backofficeUrl, shopDomain, appearance = DEFAULT_APPEARANCE }: CarouselWidgetProps) {
   const { brief, renderJob } = store.usePDPStore()
 
   const track = (eventType: Parameters<typeof trackWidgetEvent>[1]) =>
@@ -42,8 +43,10 @@ export function CarouselWidget({ api, store, collectionName, productTitle, backo
   const isLoading = brief && (!renderJob || renderJob.status === 'submitted' || renderJob.status === 'processing')
   const hasImage = renderJob?.status === 'succeeded' && renderJob.imageUrl
 
+  const cssVars = { '--vir-accent': appearance.accentColor, '--vir-accent-text': appearance.accentTextColor } as React.CSSProperties
+
   return (
-    <div className="vir-widget">
+    <div className="vir-widget" style={cssVars}>
       <style>{WIDGET_CSS}</style>
 
       <div
