@@ -2,9 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { WidgetProduct } from './types'
 import type { PDPStore } from './pdpStore'
 import type { Api, RenderJob, AppearanceSettings } from './api'
-import { isTerminalStatus, fetchShopifyProducts, DEFAULT_APPEARANCE } from './api'
+import { isTerminalStatus, fetchShopifyProducts, DEFAULT_APPEARANCE, trackWidgetEvent } from './api'
 import { renderCache } from './renderCache'
 import { WIDGET_CSS } from './styles'
+import { useBackofficeImage } from './useBackofficeImage'
+import { LottieLoader } from './LottieLoader'
 
 export interface RecommendationsWidgetProps {
   api: Api
@@ -12,13 +14,75 @@ export interface RecommendationsWidgetProps {
   productHandle: string
   collectionHandle: string
   shopDomain: string
+  backofficeUrl: string
   collectionName?: string
   appearance?: AppearanceSettings
 }
 
 const MAX_RECS = 10
+const EAGER_RENDER_COUNT = 4 // PDP product renders separately; fill the first visible carousel page
 
-export function RecommendationsWidget({ api, store, productHandle, collectionHandle, shopDomain, appearance = DEFAULT_APPEARANCE }: RecommendationsWidgetProps) {
+function RecCard({ product, job, brief, roomBadge, backofficeUrl, shopDomain }: {
+  product: WidgetProduct
+  job: RenderJob | undefined
+  brief: import('./types').CollectionSceneBrief | null
+  roomBadge: string
+  backofficeUrl: string
+  shopDomain: string
+}) {
+  const isRendering = !!brief && (!job || job.status === 'submitted' || job.status === 'processing')
+  const renderImgSrc = useBackofficeImage(job?.status === 'succeeded' ? job.imageUrl : null)
+  const viewTrackedForJob = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!renderImgSrc || !job?.jobId || viewTrackedForJob.current === job.jobId) return
+    viewTrackedForJob.current = job.jobId
+    trackWidgetEvent(backofficeUrl, 'render_image_viewed', {
+      shopDomain,
+      surface: 'pdp',
+      productId: product.id,
+      properties: { job_id: job.jobId },
+    })
+  }, [renderImgSrc, job?.jobId, backofficeUrl, shopDomain, product.id])
+
+  const href = job?.jobId
+    ? `/products/${product.handle}?vir_job_id=${job.jobId}`
+    : `/products/${product.handle}`
+
+  return (
+    <a className="vir-rec__card" data-product-id={product.id} href={href}>
+      <div className="vir-rec__card-img">
+        {product.imageUrl && (
+          <img
+            src={product.imageUrl}
+            alt={product.title}
+            className={`vir-rec__product-img ${renderImgSrc ? 'vir-rec__product-img--hidden' : ''}`}
+          />
+        )}
+        {!product.imageUrl && !renderImgSrc && (
+          <div className="vir-rec__img-placeholder" />
+        )}
+        {renderImgSrc && (
+          <img src={renderImgSrc} alt={`${product.title} in room`} className="vir-rec__render-img" />
+        )}
+        {isRendering && (
+          <div className="vir-rec__render-overlay">
+            <LottieLoader size={72} />
+          </div>
+        )}
+        {renderImgSrc && (
+          <span className="vir-rec__room-badge">✦ {roomBadge}</span>
+        )}
+      </div>
+      <div className="vir-rec__card-info">
+        <span className="vir-rec__card-title">{product.title}</span>
+        <span className="vir-rec__card-price">€{product.price}</span>
+      </div>
+    </a>
+  )
+}
+
+export function RecommendationsWidget({ api, store, productHandle, collectionHandle, shopDomain, backofficeUrl, appearance = DEFAULT_APPEARANCE }: RecommendationsWidgetProps) {
   const { brief } = store.usePDPStore()
 
   const [products, setProducts] = useState<WidgetProduct[]>([])
@@ -26,16 +90,10 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
   const [loadingProducts, setLoadingProducts] = useState(true)
 
   const stripRef = useRef<HTMLDivElement>(null)
-  const selfRef = useRef<HTMLDivElement>(null)
   // Track which product IDs have had a render job kicked off for the current brief
   const renderedForBrief = useRef<{ briefId: string; started: Set<string> } | null>(null)
-
-  // Scroll into view the first time the recommendations become visible (brief just set)
-  useEffect(() => {
-    if (!brief || !selfRef.current) return
-    const el = selfRef.current
-    setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 200)
-  }, [brief?.id])
+  // SSE cleanup functions keyed by productId
+  const sseCleanups = useRef<Map<string, () => void>>(new Map())
 
   // ── Load collection products, excluding current product ───────────────────
   useEffect(() => {
@@ -54,37 +112,23 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
     return () => { cancelled = true }
   }, [collectionHandle, productHandle])
 
-  // ── Poll non-terminal render jobs ─────────────────────────────────────────
+  // ── Close SSE connections and reset state when brief changes / on unmount ──
   useEffect(() => {
-    const active = [...renderJobs.entries()].filter(([, j]) => !isTerminalStatus(j.status))
-    if (!active.length) return
-    const timer = setInterval(() => {
-      active.forEach(async ([productId, job]) => {
-        try {
-          const updated = await api.getRenderJob(job.jobId)
-          setRenderJobs(prev => new Map(prev).set(productId, updated))
-          if (updated.status === 'succeeded' && brief) {
-            renderCache.set(productId, brief.id, updated)
-          }
-        } catch { /* ignore */ }
-      })
-    }, 3000)
-    return () => clearInterval(timer)
-  }, [renderJobs, api, brief])
-
-  // Clear render jobs when brief is cleared
-  useEffect(() => {
-    if (!brief) {
-      setRenderJobs(new Map())
-      renderedForBrief.current = null
+    sseCleanups.current.forEach(cleanup => cleanup())
+    sseCleanups.current.clear()
+    setRenderJobs(new Map())
+    renderedForBrief.current = null
+    return () => {
+      sseCleanups.current.forEach(cleanup => cleanup())
+      sseCleanups.current.clear()
     }
-  }, [brief])
+  }, [brief?.id])
 
   // ── Kick off render for a product (called by IntersectionObserver) ────────
   const startRender = useCallback(async (product: WidgetProduct) => {
     if (!brief) return
     const tracker = renderedForBrief.current
-    if (tracker?.started.has(product.id)) return
+    if (tracker?.briefId === brief.id && tracker.started.has(product.id)) return
 
     if (!renderedForBrief.current || renderedForBrief.current.briefId !== brief.id) {
       renderedForBrief.current = { briefId: brief.id, started: new Set() }
@@ -109,7 +153,16 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
         product: { title: product.title, material: product.material, cabinetColor: '' },
       })
       setRenderJobs(prev => new Map(prev).set(product.id, job))
-      if (job.status === 'succeeded') renderCache.set(product.id, brief.id, job)
+      if (job.status === 'succeeded') {
+        renderCache.set(product.id, brief.id, job)
+      } else if (!isTerminalStatus(job.status)) {
+        const cleanup = api.watchRenderJob(job.jobId, (updated) => {
+          setRenderJobs(prev => new Map(prev).set(product.id, updated))
+          if (updated.status === 'succeeded' && brief) renderCache.set(product.id, brief.id, updated)
+          if (isTerminalStatus(updated.status)) sseCleanups.current.delete(product.id)
+        })
+        sseCleanups.current.set(product.id, cleanup)
+      }
     } catch (err) {
       console.error('[VIR/Rec] createRenderJob failed for', product.title, err)
       renderedForBrief.current?.started.delete(product.id)
@@ -121,7 +174,16 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
     }
   }, [brief, api, shopDomain])
 
-  // ── IntersectionObserver: start render when card scrolls into view ────────
+  // ── Eager parallel renders for the first visible page ────────────────────
+  // All jobs share the room photo via Gemini Files API URI so N renders cost
+  // the same transfer as 1 and complete in parallel (~17s total, not 17s × N).
+  // Products beyond EAGER_RENDER_COUNT fall through to the IntersectionObserver.
+  useEffect(() => {
+    if (!brief || !products.length) return
+    products.slice(0, EAGER_RENDER_COUNT).forEach(product => startRender(product))
+  }, [brief?.id, products, startRender])
+
+  // ── IntersectionObserver: lazy render for products beyond the eager page ──
   useEffect(() => {
     if (!brief || !stripRef.current || !products.length) return
 
@@ -148,12 +210,16 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
     el.scrollBy({ left: dir === 'next' ? el.offsetWidth : -el.offsetWidth, behavior: 'smooth' })
   }
 
-  if (loadingProducts || products.length === 0 || !brief) return null
+  // Hide products whose render job failed (e.g. no cutout available) — show only
+  // products that are pending, in-flight, or successfully rendered.
+  const visibleProducts = products.filter(p => renderJobs.get(p.id)?.status !== 'failed')
+
+  if (loadingProducts || visibleProducts.length === 0 || !brief) return null
 
   const cssVars = { '--vir-accent': appearance.accentColor, '--vir-accent-text': appearance.accentTextColor } as React.CSSProperties
 
   return (
-    <div ref={selfRef} className="vir-widget" style={cssVars}>
+    <div className="vir-widget" style={cssVars}>
       <style>{WIDGET_CSS}</style>
       <div className="vir-rec">
         <div className="vir-rec__header">
@@ -172,50 +238,17 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
         </div>
 
         <div className="vir-rec__strip" ref={stripRef}>
-          {products.map(product => {
-            const job = renderJobs.get(product.id)
-            const isRendering = !!brief && (!job || job.status === 'submitted' || job.status === 'processing')
-            const renderUrl = job?.status === 'succeeded' ? job.imageUrl : null
-            const href = job?.jobId
-              ? `/products/${product.handle}?vir_job_id=${job.jobId}`
-              : `/products/${product.handle}`
-
-            return (
-              <a key={product.id} className="vir-rec__card" data-product-id={product.id} href={href}>
-                <div className="vir-rec__card-img">
-                  {product.imageUrl && (
-                    <img
-                      src={product.imageUrl}
-                      alt={product.title}
-                      className={`vir-rec__product-img ${renderUrl ? 'vir-rec__product-img--hidden' : ''}`}
-                    />
-                  )}
-                  {!product.imageUrl && !renderUrl && (
-                    <div className="vir-rec__img-placeholder" />
-                  )}
-
-                  {renderUrl && (
-                    <img src={renderUrl} alt={`${product.title} in room`} className="vir-rec__render-img" />
-                  )}
-
-                  {isRendering && (
-                    <div className="vir-rec__render-overlay">
-                      <span className="vir-spinner vir-spinner--dark" />
-                    </div>
-                  )}
-
-                  {renderUrl && (
-                    <span className="vir-rec__room-badge">✦ {appearance.recsRoomBadge}</span>
-                  )}
-                </div>
-
-                <div className="vir-rec__card-info">
-                  <span className="vir-rec__card-title">{product.title}</span>
-                  <span className="vir-rec__card-price">€{product.price}</span>
-                </div>
-              </a>
-            )
-          })}
+          {visibleProducts.map(product => (
+            <RecCard
+              key={product.id}
+              product={product}
+              job={renderJobs.get(product.id)}
+              brief={brief}
+              roomBadge={appearance.recsRoomBadge}
+              backofficeUrl={backofficeUrl}
+              shopDomain={shopDomain}
+            />
+          ))}
         </div>
       </div>
     </div>

@@ -1,58 +1,70 @@
+import { useRef } from 'react'
 import type { DetectedZone, RoomProfile } from '../../types'
+import type { CameraEventName } from '../useSetupFlow'
 
 interface RoomAnalysisProps {
   room: RoomProfile
   zones: DetectedZone[]
   isLoadingZones: boolean
   onChangeRoom: () => void
+  onRoomUpload: (file: File) => void
+  onCameraEvent?: (event: CameraEventName) => void
 }
 
-function RoomPreview({ room }: { room: RoomProfile }) {
-  if (room.imageDataUrl) {
-    return (
-      <img
-        src={room.imageDataUrl}
-        alt={room.name}
-        style={{ width: '100%', height: '140px', objectFit: 'cover', display: 'block', borderRadius: '6px' }}
-      />
-    )
-  }
+function isMobileWithCamera() {
   return (
-    <svg width="100%" height="140" viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
-      <rect width="320" height="140" fill={room.bgColor} />
-      <rect x="0" y="106" width="320" height="34" fill={room.floorColor} />
-      <rect x="0" y="102" width="320" height="5" fill={room.accentColor} opacity="0.3" />
-      <rect x="30" y="24" width="72" height="48" rx="2" fill="#1a1a1a" opacity="0.8" />
-      <rect x="30" y="20" width="30" height="14" rx="3" fill="#2563EB" opacity="0.9" />
-      <text x="45" y="30" fontFamily="sans-serif" fontSize="8" fill="white" textAnchor="middle" fontWeight="600">TV</text>
-      <rect x="140" y="58" width="44" height="48" rx="2" fill={room.accentColor} opacity="0.65" />
-      <line x1="162" y1="58" x2="162" y2="106" stroke={room.bgColor} strokeWidth="1.5" opacity="0.6" />
-      <rect x="126" y="48" width="70" height="14" rx="3" fill="#7C3AED" opacity="0.9" />
-      <text x="161" y="58" fontFamily="sans-serif" fontSize="8" fill="white" textAnchor="middle" fontWeight="600">Cabinet</text>
-      <rect x="295" y="0" width="8" height="106" fill={room.accentColor} opacity="0.2" />
-      <rect x="288" y="36" width="22" height="14" rx="3" fill="#059669" opacity="0.9" />
-      <text x="299" y="46" fontFamily="sans-serif" fontSize="7" fill="white" textAnchor="middle" fontWeight="600">R.Wall</text>
-      <rect x="188" y="82" width="88" height="28" rx="4" fill={room.accentColor} opacity="0.4" />
-      <rect x="8" y="4" width="50" height="14" rx="3" fill="#D97706" opacity="0.9" />
-      <text x="33" y="14" fontFamily="sans-serif" fontSize="7" fill="white" textAnchor="middle" fontWeight="600">Back Wall</text>
-    </svg>
+    typeof navigator !== 'undefined' &&
+    navigator.maxTouchPoints > 1 &&
+    typeof navigator.mediaDevices?.getUserMedia === 'function'
   )
 }
 
-export function RoomAnalysis({ room, zones, isLoadingZones, onChangeRoom }: RoomAnalysisProps) {
+export function RoomAnalysis({ room, zones, isLoadingZones, onChangeRoom, onRoomUpload, onCameraEvent: _onCameraEvent }: RoomAnalysisProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const showCamera = isMobileWithCamera()
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) onRoomUpload(file)
+    e.target.value = ''
+  }
+
   return (
     <div className="room-analysis">
-      <div className="room-analysis__header">
-        <div className="room-analysis__room-info">
-          <span className="room-analysis__room-name">{room.name}</span>
-          <button className="btn btn--ghost btn--xs" onClick={onChangeRoom}>
-            Change room
-          </button>
-        </div>
-      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
 
       <div className="room-analysis__preview">
-        <RoomPreview room={room} />
+        {room.imageDataUrl ? (
+          <img
+            src={room.imageDataUrl}
+            alt={room.name}
+            style={{ width: '100%', height: '160px', objectFit: 'cover', display: 'block', borderRadius: '6px' }}
+          />
+        ) : (
+          <svg width="100%" height="160" viewBox="0 0 320 160" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block', borderRadius: '6px' }}>
+            <rect width="320" height="160" fill={room.bgColor} />
+            <rect x="0" y="122" width="320" height="38" fill={room.floorColor} />
+            <rect x="140" y="68" width="44" height="54" rx="2" fill={room.accentColor} opacity="0.65" />
+          </svg>
+        )}
+      </div>
+
+      {/* Re-upload / retake actions */}
+      <div className="room-analysis__change">
+        {showCamera ? (
+          <>
+            <button className="btn btn--ghost btn--xs" onClick={onChangeRoom}>📷 Retake photo</button>
+            <button className="btn btn--ghost btn--xs" onClick={() => fileInputRef.current?.click()}>⬆ New upload</button>
+          </>
+        ) : (
+          <button className="btn btn--ghost btn--xs" onClick={() => fileInputRef.current?.click()}>⬆ Change photo</button>
+        )}
       </div>
 
       <div className="room-analysis__zones" data-testid="zones-section">

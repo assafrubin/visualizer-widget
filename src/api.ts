@@ -1,4 +1,4 @@
-import type { RoomProfile, DetectedZone, QuickActionId, EnhancedSceneBrief, WidgetProduct } from './types'
+import type { RoomProfile, QuickAction, QuickActionId, EnhancedSceneBrief, WidgetProduct } from './types'
 
 export interface AppearanceSettings {
   accentColor: string
@@ -26,9 +26,11 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   recsRoomBadge: 'In your room',
 }
 
+const NGROK_HEADERS = { 'ngrok-skip-browser-warning': 'true' }
+
 export async function fetchAppearanceSettings(backofficeUrl: string, shopDomain: string): Promise<AppearanceSettings> {
   try {
-    const res = await fetch(`${backofficeUrl}/api/public/appearance?shop=${encodeURIComponent(shopDomain)}`)
+    const res = await fetch(`${backofficeUrl}/api/public/appearance?shop=${encodeURIComponent(shopDomain)}`, { headers: NGROK_HEADERS })
     if (!res.ok) return { ...DEFAULT_APPEARANCE }
     return { ...DEFAULT_APPEARANCE, ...await res.json() as Partial<AppearanceSettings> }
   } catch {
@@ -51,7 +53,7 @@ export function isTerminalStatus(status: RenderJob['status']): boolean {
 export function createApi(baseUrl: string) {
   async function req<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${baseUrl}/api${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
       ...init,
     })
     if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`)
@@ -71,13 +73,12 @@ export function createApi(baseUrl: string) {
     getRooms: () =>
       req<{ rooms: RoomProfile[] }>('/rooms').then(r => r.rooms),
 
-    uploadRoom: (body: { imageDataUrl: string; filename: string }) =>
-      req<{ room: RoomProfile }>('/rooms/upload', { method: 'POST', body: JSON.stringify(body) })
-        .then(r => r.room),
+    uploadRoom: (body: { imageDataUrl: string; filename: string; productCategory?: string | null }) =>
+      req<{ room: RoomProfile; actions: QuickAction[] }>('/rooms/upload', { method: 'POST', body: JSON.stringify(body) }),
 
-    analyzeRoom: (roomId: string) =>
-      req<{ zones: DetectedZone[] }>(`/rooms/${roomId}/analysis`, { method: 'POST' })
-        .then(r => r.zones),
+    analyzeRoom: (roomId: string, body: { productCategory?: string | null } = {}) =>
+      req<{ actions: QuickAction[] }>(`/rooms/${roomId}/analysis`, { method: 'POST', body: JSON.stringify(body) })
+        .then(r => r.actions),
 
     getSceneBrief: (briefId: string) =>
       req<{ brief: EnhancedSceneBrief }>(`/scene-briefs/${briefId}`).then(r => r.brief),
@@ -92,6 +93,82 @@ export function createApi(baseUrl: string) {
 
     getRenderJob: (jobId: string) =>
       req<{ job: RenderJob }>(`/render-jobs/${jobId}`).then(r => resolveJob(r.job)),
+
+    watchRenderJob: (jobId: string, onUpdate: (job: RenderJob) => void): (() => void) => {
+      const url = `${baseUrl}/api/render-jobs/${jobId}/events`
+      const controller = new AbortController()
+      let closed = false
+      let pollTimer: ReturnType<typeof setInterval> | null = null
+
+      const startPollingFallback = () => {
+        pollTimer = setInterval(async () => {
+          if (closed) { clearInterval(pollTimer!); return }
+          try {
+            const job = resolveJob((await req<{ job: RenderJob }>(`/render-jobs/${jobId}`)).job)
+            onUpdate(job)
+            if (isTerminalStatus(job.status)) { clearInterval(pollTimer!); pollTimer = null }
+          } catch { /* ignore */ }
+        }, 5000)
+      }
+
+      ;(async () => {
+        try {
+          const res = await fetch(url, {
+            headers: { 'ngrok-skip-browser-warning': 'true' },
+            signal: controller.signal,
+          })
+          if (!res.ok || !res.body) { if (!closed) startPollingFallback(); return }
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let buf = ''
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done || closed) break
+            buf += decoder.decode(value, { stream: true })
+            const parts = buf.split('\n\n')
+            buf = parts.pop() ?? ''
+            for (const part of parts) {
+              const line = part.trim()
+              if (!line.startsWith('data:')) continue
+              try { onUpdate(resolveJob(JSON.parse(line.slice(5).trim()) as RenderJob)) } catch { /* ignore */ }
+            }
+          }
+        } catch {
+          if (!closed) startPollingFallback()
+        }
+      })()
+
+      return () => {
+        closed = true
+        controller.abort()
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      }
+    },
+
+    reportRenderTiming: (jobId: string, stages: {
+      briefMs: number; submitMs: number; pollWaitMs: number; totalClientMs: number
+    }): void => {
+      fetch(`${baseUrl}/api/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({
+          eventType: 'render_client_timing',
+          jobId,
+          anonymousId: (() => {
+            const key = 'vir_anon_id'
+            let id = localStorage.getItem(key)
+            if (!id) { id = crypto.randomUUID(); localStorage.setItem(key, id) }
+            return id
+          })(),
+          properties: {
+            brief_ms: stages.briefMs,
+            submit_ms: stages.submitMs,
+            poll_wait_ms: stages.pollWaitMs,
+            total_client_ms: stages.totalClientMs,
+          },
+        }),
+      }).catch(() => { /* fire and forget */ })
+    },
   }
 }
 
@@ -155,8 +232,8 @@ interface PublicConfigResponse {
 }
 
 const FAIL_OPEN: WidgetConfig = {
-  collectionEnabled: true,
-  pdpCtaEnabled: true,
+  collectionEnabled: false,
+  pdpCtaEnabled: false,
   pdpCarouselEnabled: false,
   pdpRecommendationsEnabled: false,
 }
@@ -167,14 +244,14 @@ export async function fetchWidgetConfig(
   collectionHandle: string,
 ): Promise<WidgetConfig> {
   try {
-    const res = await fetch(`${backofficeUrl}/api/public/config?shop=${encodeURIComponent(shopDomain)}`)
+    const res = await fetch(`${backofficeUrl}/api/public/config?shop=${encodeURIComponent(shopDomain)}`, { headers: NGROK_HEADERS })
     if (!res.ok) return FAIL_OPEN
     const data = await res.json() as PublicConfigResponse
     const collectionEnabled = data.enabledCollectionHandles.includes(collectionHandle)
     const settings = data.collectionSettings?.[collectionHandle]
     return {
       collectionEnabled,
-      pdpCtaEnabled: settings?.pdpCtaEnabled ?? true,
+      pdpCtaEnabled: settings?.pdpCtaEnabled ?? false,
       pdpCarouselEnabled: settings?.pdpCarouselEnabled ?? false,
       pdpRecommendationsEnabled: settings?.pdpRecommendationsEnabled ?? false,
     }
@@ -225,6 +302,34 @@ function getAnonymousId(): string {
     localStorage.setItem(key, id)
   }
   return id
+}
+
+export interface PDPConfig {
+  collectionHandle: string
+  pdpCtaEnabled: boolean
+  pdpCarouselEnabled: boolean
+  pdpRecommendationsEnabled: boolean
+  productCategory?: string | null
+}
+
+// Called on PDP pages when the collection handle can't be inferred from the DOM.
+// The server looks up which collection the product belongs to via sku_assets.
+export async function fetchWidgetPDPConfig(
+  backofficeUrl: string,
+  shopDomain: string,
+  productHandle: string,
+): Promise<PDPConfig> {
+  const fallback: PDPConfig = { collectionHandle: '', pdpCtaEnabled: false, pdpCarouselEnabled: false, pdpRecommendationsEnabled: false }
+  try {
+    const res = await fetch(
+      `${backofficeUrl}/api/public/pdp-config?shop=${encodeURIComponent(shopDomain)}&productHandle=${encodeURIComponent(productHandle)}`,
+      { headers: { 'ngrok-skip-browser-warning': 'true' } },
+    )
+    if (!res.ok) return fallback
+    return await res.json() as PDPConfig
+  } catch {
+    return fallback
+  }
 }
 
 // Kept for backwards-compat with Widget.tsx (collection page)

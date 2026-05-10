@@ -9,17 +9,27 @@ export interface RoomProfile {
 }
 
 export type QuickActionId =
-  | 'replace-existing'
-  | 'near-tv'
-  | 'right-wall'
-  | 'back-wall'
-  | 'front-existing'
+  | 'replace-sofa'
+  | 'replace-armchair'
+  | 'replace-cabinet'
+  | 'replace-coffee-table'
+  | 'replace-rug'
+  | 'replace-lamp'
+  | 'replace-dining-table'
+  | 'add-left-wall'
+  | 'add-right-wall'
+  | 'add-corner'
+  | 'add-center'
+  | 'add-under-window'
+  | 'add-beside-sofa'
+  | 'add-floating'
 
 export interface QuickAction {
   id: QuickActionId
   label: string
-  zone: string
   icon: string
+  renderInstruction: string
+  isReplace: boolean
 }
 
 export interface DetectedZone {
@@ -62,14 +72,6 @@ export interface ShopifyApiProduct {
   variants: Array<{ price: string }>
   images: Array<{ src: string }>
 }
-
-export const QUICK_ACTIONS: QuickAction[] = [
-  { id: 'replace-existing', label: 'Replace existing cabinet', zone: 'Existing cabinet zone', icon: '🔄' },
-  { id: 'near-tv',          label: 'Put near the TV',                  zone: 'TV zone',              icon: '📺' },
-  { id: 'right-wall',       label: 'Place against the right wall',     zone: 'Right wall',            icon: '→'  },
-  { id: 'back-wall',        label: 'Place against the back wall',      zone: 'Back wall',             icon: '↑'  },
-  { id: 'front-existing',   label: 'Put in front of the existing cabinet', zone: 'Cabinet zone',     icon: '⬤' },
-]
 
 export function mapShopifyProduct(p: ShopifyApiProduct): WidgetProduct {
   const material = p.product_type

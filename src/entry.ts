@@ -4,10 +4,36 @@ import { Widget } from './Widget'
 import { PDPWidget } from './PDPWidget'
 import { CarouselWidget } from './CarouselWidget'
 import { RecommendationsWidget } from './RecommendationsWidget'
-import { createApi, fetchWidgetConfig, fetchAppearanceSettings, trackWidgetEvent } from './api'
+import { createApi, fetchWidgetConfig, fetchWidgetPDPConfig, fetchAppearanceSettings, trackWidgetEvent } from './api'
 import { createPDPStore } from './pdpStore'
 
-const currentScript = document.currentScript as HTMLScriptElement | null
+function getAnonymousId(): string {
+  const key = 'vir_anon_id'
+  let id = localStorage.getItem(key)
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem(key, id) }
+  return id
+}
+
+function setupAddToCartTracking(): void {
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement
+    const btn = target.closest('[type="submit"], [name="add"], .add-to-cart, .btn-cart') as HTMLElement | null
+    if (!btn) return
+    if (!btn.closest('form[action*="/cart/add"]')) return
+    // Write the VIR anonymous ID as a cart attribute so it flows into the order
+    fetch('/cart/update.js', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attributes: { vir_anon_id: getAnonymousId() } }),
+    }).catch(() => { /* silent — attribution is best-effort */ })
+  }, { capture: true, passive: true })
+}
+
+// document.currentScript is null when the script is async/deferred or the browser
+// doesn't set it (some mobile environments). Fall back to finding the script by
+// its unique data attribute so we can still read backofficeUrl and shopDomain.
+const currentScript = (document.currentScript as HTMLScriptElement | null)
+  ?? document.querySelector<HTMLScriptElement>('script[data-backoffice-url]')
 
 function parsePath() {
   const path = window.location.pathname
@@ -74,36 +100,57 @@ async function init() {
 
   const { collectionHandle: autoCollection, productHandle, isPDP } = parsePath()
 
-  const collectionHandle = currentScript?.dataset.collectionHandle
-    ?? (isPDP ? inferCollectionHandle() : autoCollection)
+  if (!backofficeUrl) {
+    console.warn('[VIR] Missing backoffice-url — widget not mounted')
+    return
+  }
 
-  const collectionName = currentScript?.dataset.collectionName
-    ?? (isPDP
-      ? Array.from(document.querySelectorAll('a[href*="/collections/"]'))
-          .find((l): l is HTMLAnchorElement => {
-            const h = (l as HTMLAnchorElement).href.match(/\/collections\/([^/?#]+)/)?.[1]
-            return !!h && !GENERIC_HANDLES.has(h)
-          })?.innerText?.trim()
-      : (document.querySelector('h1') as HTMLElement | null)?.innerText?.trim())
-    ?? collectionHandle
+  // On PDP pages, DOM inference is unreliable — navigation links to other collections
+  // cause the wrong collection config to be loaded. Always use the server-side lookup
+  // (fetchWidgetPDPConfig) unless the merchant explicitly set data-collection-handle.
+  const explicitHandle = currentScript?.dataset.collectionHandle
+  let collectionHandle = explicitHandle ?? (isPDP ? '' : autoCollection)
 
   const productTitle = (document.querySelector('h1') as HTMLElement | null)?.innerText?.trim()
     ?? productHandle
 
-  if (!backofficeUrl || !collectionHandle) {
-    console.warn('[VIR] Missing backoffice-url or collection-handle — widget not mounted')
-    return
+  let config: import('./api').WidgetConfig
+  const appearance = await fetchAppearanceSettings(backofficeUrl, shopDomain)
+
+  if (isPDP && !explicitHandle) {
+    // Server looks up which collection this product belongs to via sku_assets
+    const pdpConfig = await fetchWidgetPDPConfig(backofficeUrl, shopDomain, productHandle)
+    collectionHandle = pdpConfig.collectionHandle
+    config = {
+      collectionEnabled: false,
+      pdpCtaEnabled: pdpConfig.pdpCtaEnabled,
+      pdpCarouselEnabled: pdpConfig.pdpCarouselEnabled,
+      pdpRecommendationsEnabled: pdpConfig.pdpRecommendationsEnabled,
+    }
+    // Make productCategory available for the setup flow action selection
+    Object.assign(config, { productCategory: pdpConfig.productCategory ?? null })
+  } else {
+    if (!collectionHandle) {
+      console.warn('[VIR] Missing collection-handle — widget not mounted')
+      return
+    }
+    config = await fetchWidgetConfig(backofficeUrl, shopDomain, collectionHandle)
   }
 
-  const [config, appearance] = await Promise.all([
-    fetchWidgetConfig(backofficeUrl, shopDomain, collectionHandle),
-    fetchAppearanceSettings(backofficeUrl, shopDomain),
-  ])
+  const collectionName = currentScript?.dataset.collectionName
+    ?? (isPDP
+      // Find the link whose href matches the resolved collectionHandle for display name
+      ? Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/collections/"]'))
+          .find(l => l.href.match(/\/collections\/([^/?#]+)/)?.[1] === collectionHandle)
+          ?.innerText?.trim()
+      : (document.querySelector('h1') as HTMLElement | null)?.innerText?.trim())
+    ?? collectionHandle
 
   if (isPDP) {
     if (!config.pdpCtaEnabled && !config.pdpCarouselEnabled && !config.pdpRecommendationsEnabled) return
 
     trackWidgetEvent(backofficeUrl, 'pdp_viewed', { shopDomain, surface: 'pdp' })
+    setupAddToCartTracking()
 
     const api = createApi(backofficeUrl)
     const store = createPDPStore(api, productHandle, productTitle, shopDomain)
@@ -126,7 +173,7 @@ async function init() {
         const h1 = document.querySelector('h1')
         h1?.insertAdjacentElement('afterend', container) ?? document.body.prepend(container)
       }
-      mount(container, createElement(PDPWidget, { api, store, collectionHandle, collectionName: collectionName ?? collectionHandle, productTitle, backofficeUrl, shopDomain, appearance }))
+      mount(container, createElement(PDPWidget, { api, store, collectionHandle, collectionName: collectionName ?? collectionHandle, productHandle, productTitle, productCategory: (config as { productCategory?: string | null }).productCategory, backofficeUrl, shopDomain, appearance }))
     }
 
     if (config.pdpCarouselEnabled) {
@@ -154,7 +201,7 @@ async function init() {
         document.body.appendChild(container)
       }
       mount(container, createElement(RecommendationsWidget, {
-        api, store, productHandle, collectionHandle, shopDomain, collectionName: collectionName ?? collectionHandle, appearance,
+        api, store, productHandle, collectionHandle, shopDomain, backofficeUrl, collectionName: collectionName ?? collectionHandle, appearance,
       }))
     }
   } else {

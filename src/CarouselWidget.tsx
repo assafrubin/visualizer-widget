@@ -5,6 +5,8 @@ import { trackWidgetEvent, DEFAULT_APPEARANCE } from './api'
 import { WIDGET_CSS } from './styles'
 import { useSetupFlow } from './setup/useSetupFlow'
 import { SetupModal } from './setup/SetupModal'
+import { useBackofficeImage } from './useBackofficeImage'
+import { LottieLoader } from './LottieLoader'
 
 export interface CarouselWidgetProps {
   api: Api
@@ -34,14 +36,15 @@ export function CarouselWidget({ api, store, collectionName, productTitle, backo
         refinementText: draft.refinementText,
         collectionName: draft.collectionName,
       })
-      await store.setBrief({ ...draft, ...record })
+      // Preserve imageDataUrl — server's room object doesn't carry it.
+      await store.setBrief({ ...draft, ...record, room: { ...record.room, imageDataUrl: draft.room.imageDataUrl } })
     },
   })
 
   const { isOpen, ...modalProps } = bindings
 
   const isLoading = brief && (!renderJob || renderJob.status === 'submitted' || renderJob.status === 'processing')
-  const hasImage = renderJob?.status === 'succeeded' && renderJob.imageUrl
+  const renderImgSrc = useBackofficeImage(renderJob?.status === 'succeeded' ? renderJob.imageUrl : null)
 
   const cssVars = { '--vir-accent': appearance.accentColor, '--vir-accent-text': appearance.accentTextColor } as React.CSSProperties
 
@@ -66,14 +69,14 @@ export function CarouselWidget({ api, store, collectionName, productTitle, backo
 
         {isLoading && (
           <div className="vir-carousel-slot__loading">
-            <span className="vir-spinner vir-spinner--dark" />
+            <LottieLoader size={80} />
             <span>Generating…</span>
           </div>
         )}
 
-        {hasImage && (
+        {renderImgSrc && (
           <img
-            src={renderJob!.imageUrl!}
+            src={renderImgSrc}
             alt={`${productTitle} in ${brief!.room.name}`}
             className="vir-carousel-slot__img"
           />

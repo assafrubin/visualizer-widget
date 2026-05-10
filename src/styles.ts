@@ -4,6 +4,8 @@ export const WIDGET_CSS = `
   -webkit-font-smoothing: antialiased;
   line-height: 1.5;
   color: #1A1916;
+  position: relative;
+  z-index: 10;
 }
 
 .vir-widget *, .vir-widget *::before, .vir-widget *::after {
@@ -204,7 +206,7 @@ export const WIDGET_CSS = `
 .vir-widget .modal-backdrop {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);
-  z-index: 99999;
+  z-index: 2147483647;
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 
@@ -263,97 +265,87 @@ export const WIDGET_CSS = `
 /* ── Room selector ── */
 .vir-widget .room-selector { display: flex; flex-direction: column; gap: 16px; }
 
-.vir-widget .room-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
-
-.vir-widget .room-card {
-  display: flex; flex-direction: column; gap: 8px;
-  border: 2px solid var(--vir-border); border-radius: var(--vir-r);
-  cursor: pointer; text-align: left; overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  background: none; font-family: inherit; padding: 0;
-}
-.vir-widget .room-card:hover { border-color: var(--vir-border-strong); box-shadow: var(--vir-shadow-sm); }
-.vir-widget .room-card--selected { border-color: var(--vir-blue); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
-
-.vir-widget .room-card__thumbnail { position: relative; line-height: 0; background: var(--vir-bg); }
-.vir-widget .room-card__thumbnail svg { width: 100%; height: auto; }
-
-.vir-widget .room-card__uploaded-tag {
-  position: absolute; top: 8px; left: 8px; background: var(--vir-purple); color: #fff;
-  font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 100px;
-  text-transform: uppercase; letter-spacing: 0.3px;
+.vir-widget .setup-upload-subtitle {
+  font-size: 14px; color: var(--vir-text-muted); margin-bottom: 4px; line-height: 1.5;
 }
 
-.vir-widget .room-card__check {
-  position: absolute; top: 8px; right: 8px; width: 22px; height: 22px;
-  border-radius: 50%; background: var(--vir-blue); color: #fff;
-  font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+/* Desktop: large drop zone */
+.vir-widget .upload-dropzone {
+  width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 48px 24px;
+  border: 2px dashed var(--vir-border-strong); border-radius: var(--vir-r-lg);
+  background: var(--vir-bg); cursor: pointer; font-family: inherit; text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.vir-widget .upload-dropzone:hover { border-color: var(--vir-blue); background: var(--vir-blue-light); }
+.vir-widget .upload-dropzone__icon { font-size: 36px; line-height: 1; color: var(--vir-text-subtle); }
+.vir-widget .upload-dropzone__title { font-size: 16px; font-weight: 700; color: var(--vir-text); }
+.vir-widget .upload-dropzone__hint { font-size: 12px; color: var(--vir-text-subtle); }
+.vir-widget .upload-dropzone__cta {
+  margin-top: 8px; padding: 10px 28px;
+  background: var(--vir-accent); color: var(--vir-accent-text);
+  border-radius: var(--vir-r); font-size: 14px; font-weight: 600;
+  pointer-events: none;
 }
 
-.vir-widget .room-card__name { font-size: 13px; font-weight: 600; padding: 0 10px 10px; }
+/* Mobile: two side-by-side action cards */
+.vir-widget .upload-actions { display: flex; gap: 12px; }
 
-.vir-widget .upload-zone {
-  display: flex; align-items: center; gap: 14px; padding: 14px 18px;
-  border: 1.5px dashed var(--vir-border-strong); border-radius: var(--vir-r); background: var(--vir-bg);
+.vir-widget .upload-action-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 28px 16px;
+  border: 2px solid var(--vir-border); border-radius: var(--vir-r-lg);
+  background: var(--vir-surface); font-family: inherit; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.12s;
 }
-.vir-widget .upload-zone__icon { font-size: 20px; color: var(--vir-text-subtle); flex-shrink: 0; }
-.vir-widget .upload-zone__text { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-.vir-widget .upload-zone__text strong { font-weight: 600; }
-.vir-widget .upload-zone__text span { font-size: 12px; color: var(--vir-text-subtle); }
-.vir-widget .upload-zone__mobile-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.vir-widget .upload-action-btn:hover:not(:disabled) { border-color: var(--vir-border-strong); background: var(--vir-bg); transform: translateY(-1px); }
+.vir-widget .upload-action-btn:disabled { opacity: 0.5; cursor: default; }
+.vir-widget .upload-action-btn--primary { border-color: var(--vir-blue); background: var(--vir-blue-light); }
+.vir-widget .upload-action-btn--primary:hover:not(:disabled) { background: #dbeafe; }
+.vir-widget .upload-action-btn__icon { font-size: 32px; line-height: 1; }
+.vir-widget .upload-action-btn__label { font-size: 14px; font-weight: 600; color: var(--vir-text); }
 
-/* ── Camera viewfinder ── */
-.vir-widget .vir-camera {
-  border-radius: var(--vir-r); overflow: hidden;
-  background: #000; display: flex; flex-direction: column;
+
+/* ── Placement step (step 2) ── */
+.vir-widget .placement-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
 }
-.vir-widget .vir-camera__viewfinder {
-  width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block;
-}
-.vir-widget .vir-camera__actions {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 20px; background: #111;
-}
-.vir-widget .vir-camera__shutter {
-  width: 60px; height: 60px; border-radius: 50%;
-  background: #fff; border: none; cursor: pointer; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; position: relative;
-}
-.vir-widget .vir-camera__shutter:active { transform: scale(0.93); }
-.vir-widget .vir-camera__shutter-ring {
-  display: block; width: 50px; height: 50px; border-radius: 50%;
-  border: 2px solid #111; pointer-events: none;
+@media (max-width: 580px) {
+  .vir-widget .placement-layout { grid-template-columns: 1fr; gap: 16px; }
 }
 
-/* ── Room analysis ── */
-.vir-widget .room-analysis { display: flex; flex-direction: column; gap: 12px; }
+/* Room photo — left column, preserves aspect ratio, no crop */
+.vir-widget .placement-photo {
+  position: relative; width: 100%; line-height: 0;
+  background: var(--vir-bg); border-radius: var(--vir-r);
+  overflow: hidden; border: 1px solid var(--vir-border);
+}
+.vir-widget .placement-photo__img {
+  width: 100%; height: auto; object-fit: contain; display: block;
+}
+.vir-widget .placement-photo__change {
+  position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;
+}
+.vir-widget .placement-photo__btn {
+  padding: 5px 11px;
+  background: rgba(255,255,255,0.92); backdrop-filter: blur(6px);
+  border: 1px solid rgba(0,0,0,0.1); border-radius: 100px;
+  font-family: inherit; font-size: 12px; font-weight: 600; color: var(--vir-text);
+  cursor: pointer; transition: background 0.15s; line-height: 1.4;
+}
+.vir-widget .placement-photo__btn:hover { background: #fff; }
 
-.vir-widget .room-analysis__room-info {
-  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
-}
-.vir-widget .room-analysis__room-name { font-size: 15px; font-weight: 700; }
+/* Placement section — right column */
+.vir-widget .placement-section { display: flex; flex-direction: column; gap: 16px; }
+.vir-widget .placement-section__header { display: flex; flex-direction: column; gap: 4px; }
+.vir-widget .placement-section__title { font-size: 17px; font-weight: 700; }
+.vir-widget .placement-section__subtitle { font-size: 13px; color: var(--vir-text-muted); line-height: 1.4; }
 
-.vir-widget .room-analysis__preview {
-  border-radius: var(--vir-r); overflow: hidden; border: 1px solid var(--vir-border);
-}
-
-.vir-widget .room-analysis__zones {
-  background: var(--vir-green-light); border: 1px solid rgba(5,150,105,0.2);
-  border-radius: var(--vir-r); padding: 12px 14px;
-}
-.vir-widget .room-analysis__zones-label {
-  font-size: 13px; font-weight: 600; color: var(--vir-green);
-  margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
-}
-
-.vir-widget .zone-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.vir-widget .zone-chip {
-  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;
-  background: #fff; border: 1px solid rgba(5,150,105,0.25); border-radius: 100px;
-  font-size: 12px; font-weight: 500;
-}
-.vir-widget .zone-chip__icon { font-size: 13px; }
+/* Action options — a bit more breathing room */
+.vir-widget .action-option { padding: 13px 14px; }
 
 /* ── Quick actions ── */
 .vir-widget .quick-actions-panel { display: flex; flex-direction: column; gap: 16px; }
@@ -392,28 +384,58 @@ export const WIDGET_CSS = `
   border-color: rgba(0,0,0,0.1); border-top-color: var(--vir-text);
 }
 
-/* ── PDP single-product render panel ── */
-.vir-widget .vir-pdp-result {
-  border: 1.5px solid var(--vir-border); border-radius: var(--vir-r-lg);
-  overflow: hidden; background: var(--vir-surface); margin: 12px 0;
+/* ── PDP render panel (full-bleed widget mode) ── */
+.vir-widget .vir-pdp-render {
+  position: relative; width: 100%; aspect-ratio: 4 / 3;
+  background: var(--vir-bg); border-radius: var(--vir-r-lg);
+  overflow: hidden; margin: 12px 0;
 }
-.vir-widget .vir-pdp-result__header {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 10px 14px; border-bottom: 1px solid var(--vir-border);
-  background: var(--vir-bg); font-size: 13px;
+
+.vir-widget .vir-pdp-render__img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
 }
-.vir-widget .vir-pdp-result__header .in-room-banner__label { flex-shrink: 0; }
-.vir-widget .vir-pdp-result__header-actions { display: flex; gap: 6px; margin-left: auto; }
-.vir-widget .vir-pdp-result__img {
-  position: relative; min-height: 220px; display: flex;
-  align-items: center; justify-content: center; background: var(--vir-bg);
+
+@keyframes vir-curtain-reveal {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0% 0 0); }
 }
-.vir-widget .vir-pdp-result__img img {
-  width: 100%; max-height: 420px; object-fit: contain; display: block;
+.vir-widget .vir-pdp-render__img--reveal {
+  animation: vir-curtain-reveal 0.85s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
-.vir-widget .vir-pdp-result__generating {
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-  padding: 40px; color: var(--vir-text-muted); font-size: 13px;
+
+.vir-widget .vir-pdp-render__generating {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: var(--vir-text-muted); font-size: 13px;
+}
+
+/* Floating close button — always visible top-right */
+.vir-widget .vir-pdp-render__close {
+  position: absolute; top: 10px; right: 10px; z-index: 2;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.38); backdrop-filter: blur(4px);
+  border: none; border-radius: 50%;
+  color: #fff; font-size: 13px; cursor: pointer;
+  transition: background 0.15s;
+}
+.vir-widget .vir-pdp-render__close:hover { background: rgba(0,0,0,0.58); }
+
+/* Floating edit button — bottom-right, appears after render */
+.vir-widget .vir-pdp-render__fab {
+  position: absolute; bottom: 12px; right: 12px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+  border: 1px solid rgba(0,0,0,0.08); border-radius: 100px;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  color: var(--vir-text); cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.14);
+  transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.vir-widget .vir-pdp-render__fab:hover {
+  background: #fff; transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
 }
 
 /* ── Recommendations carousel ── */
@@ -443,6 +465,9 @@ export const WIDGET_CSS = `
   gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory;
   scroll-behavior: smooth; -webkit-overflow-scrolling: touch;
   padding-bottom: 4px; scrollbar-width: none;
+}
+@media (max-width: 600px) {
+  .vir-widget .vir-rec__strip { grid-auto-columns: calc((100% - 12px) / 2); }
 }
 .vir-widget .vir-rec__strip::-webkit-scrollbar { display: none; }
 .vir-widget .vir-rec__card {
@@ -526,16 +551,4 @@ export const WIDGET_CSS = `
 }
 .vir-widget .vir-carousel-slot__edit:hover { text-decoration: underline; }
 
-/* ── Bridge CTA (PDP → collection) ── */
-.vir-widget .vir-bridge-cta {
-  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
-  gap: 12px; padding: 14px 16px; margin: 8px 0;
-  background: var(--vir-surface); border: 1.5px solid var(--vir-border);
-  border-radius: var(--vir-r-lg);
-}
-.vir-widget .vir-bridge-cta__text {
-  display: flex; flex-direction: column; gap: 2px; font-size: 13px;
-}
-.vir-widget .vir-bridge-cta__text strong { font-size: 14px; }
-.vir-widget .vir-bridge-cta__text span { color: var(--vir-text-muted); }
 `

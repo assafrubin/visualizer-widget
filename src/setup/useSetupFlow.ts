@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from 'react'
-import type { CollectionSceneBrief, DetectedZone, QuickAction, RoomProfile, SetupStep } from '../types'
+import { useState, useCallback } from 'react'
+import type { CollectionSceneBrief, QuickAction, RoomProfile, SetupStep } from '../types'
 import type { Api } from '../api'
 
 export type CameraEventName = 'camera_opened' | 'camera_capture' | 'camera_denied' | 'camera_error'
@@ -8,6 +8,7 @@ export interface SetupFlowConfig {
   api: Api
   activeBrief: CollectionSceneBrief | null
   collectionName: string
+  productCategory?: string | null
   onConfirm: (brief: CollectionSceneBrief) => void | Promise<void>
   onCameraEvent?: (event: CameraEventName) => void
 }
@@ -16,11 +17,10 @@ export interface SetupModalProps {
   step: SetupStep
   room: RoomProfile | null
   action: QuickAction | null
+  actions: QuickAction[]
+  isLoadingActions: boolean
   refinement: string
-  rooms: RoomProfile[]
-  zones: DetectedZone[]
-  isLoadingRooms: boolean
-  isLoadingZones: boolean
+  collectionName: string
   isConfirming: boolean
   onRoomSelect: (room: RoomProfile) => void
   onRoomContinue: () => void
@@ -38,7 +38,7 @@ export interface SetupFlowBindings extends SetupModalProps {
   isOpen: boolean
 }
 
-export function useSetupFlow({ api, activeBrief, collectionName, onConfirm, onCameraEvent }: SetupFlowConfig): {
+export function useSetupFlow({ api, activeBrief, collectionName, productCategory, onConfirm, onCameraEvent }: SetupFlowConfig): {
   openSetup: () => void
   bindings: SetupFlowBindings
 } {
@@ -47,41 +47,49 @@ export function useSetupFlow({ api, activeBrief, collectionName, onConfirm, onCa
   const [room, setRoom] = useState<RoomProfile | null>(null)
   const [action, setAction] = useState<QuickAction | null>(null)
   const [refinement, setRefinement] = useState('')
-
-  const [rooms, setRooms] = useState<RoomProfile[]>([])
-  const [zones, setZones] = useState<DetectedZone[]>([])
-  const [isLoadingRooms, setIsLoadingRooms] = useState(false)
-  const [isLoadingZones, setIsLoadingZones] = useState(false)
+  const [actions, setActions] = useState<QuickAction[]>([])
+  const [isLoadingActions, setIsLoadingActions] = useState(false)
   const [isConfirming, setIsConfirming] = useState(false)
 
-  useEffect(() => {
-    setIsLoadingRooms(true)
-    api.getRooms()
-      .then(setRooms)
-      .catch(err => console.error('[VIR] getRooms failed:', err))
-      .finally(() => setIsLoadingRooms(false))
-  }, [api])
+  const fetchActions = useCallback(async (roomId: string): Promise<QuickAction[]> => {
+    setIsLoadingActions(true)
+    try {
+      const fetched = await api.analyzeRoom(roomId, { productCategory })
+      setActions(fetched)
+      return fetched
+    } catch (err) {
+      console.error('[VIR] analyzeRoom failed:', err)
+      return []
+    } finally {
+      setIsLoadingActions(false)
+    }
+  }, [api, productCategory])
 
   const openSetup = useCallback(() => {
     if (activeBrief) {
       setRoom(activeBrief.room)
-      setAction(activeBrief.action)
       setRefinement(activeBrief.refinementText)
       setStep('actions')
-      setIsLoadingZones(true)
-      api.analyzeRoom(activeBrief.room.id)
-        .then(setZones)
-        .catch(err => console.error('[VIR] analyzeRoom failed:', err))
-        .finally(() => setIsLoadingZones(false))
+      // Fetch the current action list, then restore the previous selection only if
+      // its ID is still valid — guards against stale IDs after a server-side update.
+      fetchActions(activeBrief.room.id).then(fetched => {
+        const valid = fetched.find(a => a.id === activeBrief.action.id)
+        setAction(valid ?? null)
+      })
+    } else if (room?.imageDataUrl) {
+      setStep('actions')
+      if (actions.length === 0) {
+        fetchActions('uploaded-room')
+      }
     } else {
       setRoom(null)
       setAction(null)
       setRefinement('')
-      setZones([])
+      setActions([])
       setStep('room-select')
     }
     setIsOpen(true)
-  }, [activeBrief, api])
+  }, [activeBrief, room, actions, fetchActions])
 
   const close = useCallback(() => setIsOpen(false), [])
 
@@ -90,17 +98,13 @@ export function useSetupFlow({ api, activeBrief, collectionName, onConfirm, onCa
   const handleRoomContinue = useCallback(() => {
     if (!room) return
     setStep('actions')
-    setZones([])
-    setIsLoadingZones(true)
-    api.analyzeRoom(room.id)
-      .then(setZones)
-      .catch(err => console.error('[VIR] analyzeRoom failed:', err))
-      .finally(() => setIsLoadingZones(false))
-  }, [room, api])
+    setActions([])
+    fetchActions(room.id)
+  }, [room, fetchActions])
 
   const handleChangeRoom = useCallback(() => {
     setStep('room-select')
-    setZones([])
+    setActions([])
   }, [])
 
   const handleActionSelect = useCallback((a: QuickAction) => setAction(a), [])
@@ -109,27 +113,35 @@ export function useSetupFlow({ api, activeBrief, collectionName, onConfirm, onCa
     const reader = new FileReader()
     reader.onload = async (e) => {
       const imageDataUrl = e.target?.result as string
-      const localRoom: RoomProfile = {
+      const tempRoom: RoomProfile = {
         id: 'uploaded-room',
         name: file.name.replace(/\.[^.]+$/, ''),
-        bgColor: '#D0CFC4',
-        accentColor: '#7A7A6A',
-        floorColor: '#B8B5A5',
-        isUploaded: true,
-        imageDataUrl,
+        bgColor: '#D0CFC4', accentColor: '#7A7A6A', floorColor: '#B8B5A5',
+        isUploaded: true, imageDataUrl,
       }
-      setRooms(prev => [...prev.filter(r => r.id !== 'uploaded-room'), localRoom])
-      setRoom(localRoom)
+      setRoom(tempRoom)
+      setStep('actions')
+      setActions([])
+      setIsLoadingActions(true)
       try {
-        const serverRoom = await api.uploadRoom({ imageDataUrl, filename: file.name })
-        setRooms(prev => prev.map(r => r.id === 'uploaded-room' ? { ...r, name: serverRoom.name } : r))
-        setRoom(prev => prev?.id === 'uploaded-room' ? { ...prev, name: serverRoom.name } : prev)
+        const { room: serverRoom, actions: contextualActions } = await api.uploadRoom({
+          imageDataUrl,
+          filename: file.name,
+          productCategory,
+        })
+        const newActions = contextualActions ?? []
+        setRoom({ ...serverRoom, imageDataUrl, isUploaded: true })
+        setActions(newActions)
+        // Clear selected action if it's not in the new list
+        setAction(prev => newActions.find(a => a.id === prev?.id) ?? null)
       } catch (err) {
-        console.error('[VIR] uploadRoom failed — proceeding with local only:', err)
+        console.error('[VIR] upload failed:', err)
+      } finally {
+        setIsLoadingActions(false)
       }
     }
     reader.readAsDataURL(file)
-  }, [api])
+  }, [api, productCategory])
 
   const handleConfirm = useCallback(async () => {
     if (!room || !action || isConfirming) return
@@ -152,11 +164,10 @@ export function useSetupFlow({ api, activeBrief, collectionName, onConfirm, onCa
       step,
       room,
       action,
+      actions,
+      isLoadingActions,
       refinement,
-      rooms,
-      zones,
-      isLoadingRooms,
-      isLoadingZones,
+      collectionName,
       isConfirming,
       onRoomSelect: handleRoomSelect,
       onRoomContinue: handleRoomContinue,

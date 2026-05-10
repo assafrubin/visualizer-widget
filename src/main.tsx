@@ -21,6 +21,7 @@ function PDPDevSandbox() {
             store={store}
             collectionHandle="side-cabinets"
             collectionName="Side Cabinets"
+            productHandle="dressoir-lucca"
             productTitle="Dressoir Lucca"
             backofficeUrl="http://localhost:3002"
             shopDomain="dev.myshopify.com"
@@ -44,6 +45,7 @@ function PDPDevSandbox() {
           productHandle="dressoir-lucca"
           collectionHandle="side-cabinets"
           shopDomain="dev.myshopify.com"
+          backofficeUrl="http://localhost:3002"
           collectionName="Side Cabinets"
         />
       )}

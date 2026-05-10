@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import type { CollectionSceneBrief } from './types'
 import type { PDPStore } from './pdpStore'
 import type { Api, AppearanceSettings } from './api'
@@ -5,7 +6,8 @@ import { trackWidgetEvent, DEFAULT_APPEARANCE } from './api'
 import { WIDGET_CSS } from './styles'
 import { useSetupFlow } from './setup/useSetupFlow'
 import { SetupModal } from './setup/SetupModal'
-import { SceneBriefChips } from './setup/SceneBriefChips'
+import { useBackofficeImage } from './useBackofficeImage'
+import { LottieLoader } from './LottieLoader'
 
 export const BRIEF_STORAGE_KEY = 'vir_imported_brief'
 
@@ -14,42 +16,58 @@ export interface PDPWidgetProps {
   store: PDPStore
   collectionHandle: string
   collectionName: string
+  productHandle: string
   productTitle: string
+  productCategory?: string | null
   backofficeUrl: string
   shopDomain: string
   appearance?: AppearanceSettings
 }
 
-export function PDPWidget({ api, store, collectionHandle, collectionName, productTitle, backofficeUrl, shopDomain, appearance = DEFAULT_APPEARANCE }: PDPWidgetProps) {
+export function PDPWidget({ api, store, collectionName, productHandle, productTitle, productCategory, backofficeUrl, shopDomain, appearance = DEFAULT_APPEARANCE }: PDPWidgetProps) {
   const { brief, renderJob } = store.usePDPStore()
+  const renderImgSrc = useBackofficeImage(renderJob?.status === 'succeeded' ? renderJob.imageUrl : null)
+  const viewTrackedForJob = useRef<string | null>(null)
 
   const track = (eventType: Parameters<typeof trackWidgetEvent>[1]) =>
     trackWidgetEvent(backofficeUrl, eventType, { shopDomain, surface: 'pdp' })
+
+  useEffect(() => {
+    if (!renderImgSrc || !renderJob?.jobId || viewTrackedForJob.current === renderJob.jobId) return
+    viewTrackedForJob.current = renderJob.jobId
+    trackWidgetEvent(backofficeUrl, 'render_image_viewed', {
+      shopDomain,
+      surface: 'pdp',
+      productId: productHandle,
+      properties: { job_id: renderJob.jobId },
+    })
+  }, [renderImgSrc, renderJob?.jobId, backofficeUrl, shopDomain, productHandle])
 
   const { openSetup, bindings } = useSetupFlow({
     api,
     activeBrief: brief,
     collectionName,
+    productCategory,
     onCameraEvent: (event) => track(event),
     onConfirm: async (draft: CollectionSceneBrief) => {
       track('setup_confirmed')
+      const t0 = Date.now()
       const record = await api.createSceneBrief({
         roomId: draft.room.id,
         actionId: draft.action.id,
         refinementText: draft.refinementText,
         collectionName: draft.collectionName,
       })
-      await store.setBrief({ ...draft, ...record })
+      const t1 = Date.now()
+      // Preserve the local imageDataUrl — the server's room object doesn't carry it.
+      await store.setBrief(
+        { ...draft, ...record, room: { ...record.room, imageDataUrl: draft.room.imageDataUrl } },
+        { briefMs: t1 - t0, t1 },
+      )
     },
   })
 
   const { isOpen, ...modalProps } = bindings
-
-  function handleNavigateToCollection() {
-    if (!brief) return
-    sessionStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(brief))
-    window.location.href = `/collections/${collectionHandle}`
-  }
 
   const cssVars = { '--vir-accent': appearance.accentColor, '--vir-accent-text': appearance.accentTextColor } as React.CSSProperties
 
@@ -67,46 +85,40 @@ export function PDPWidget({ api, store, collectionHandle, collectionName, produc
           <button className="vir-cta__btn" onClick={() => { track('setup_opened'); openSetup() }}>{appearance.pdpCtaButton}</button>
         </div>
       ) : (
-        <>
-          <div className="vir-pdp-result">
-            <div className="vir-pdp-result__header">
-              <span className="in-room-banner__label">✦ Showing in your room</span>
-              <SceneBriefChips brief={brief} variant="pill" />
-              <div className="vir-pdp-result__header-actions">
-                <button className="btn btn--ghost btn--sm" onClick={openSetup}>Edit</button>
-                <button className="btn btn--ghost btn--sm" onClick={store.clear}>✕</button>
-              </div>
-            </div>
+        <div className="vir-pdp-render">
+          {/* Always-visible dismiss button */}
+          <button className="vir-pdp-render__close" onClick={store.clear} aria-label="Remove render">✕</button>
 
-            <div className="vir-pdp-result__img">
-              {(!renderJob || renderJob.status === 'submitted' || renderJob.status === 'processing') && (
-                <div className="vir-pdp-result__generating">
-                  <span className="vir-spinner vir-spinner--dark" />
-                  Generating your room view…
-                </div>
-              )}
-              {renderJob?.status === 'succeeded' && renderJob.imageUrl && (
-                <img src={renderJob.imageUrl} alt={`${productTitle} in ${brief.room.name}`} />
-              )}
-              {renderJob?.status === 'failed' && (
-                <div className="vir-pdp-result__generating">
-                  <span style={{ fontSize: 28 }}>✦</span>
-                  Render unavailable — try again
-                </div>
-              )}
+          {/* Generating */}
+          {(!renderJob || renderJob.status === 'submitted' || renderJob.status === 'processing') && (
+            <div className="vir-pdp-render__generating">
+              <LottieLoader size={120} />
+              <span>Generating your room view…</span>
             </div>
-          </div>
+          )}
 
-          <div className="vir-bridge-cta">
-            <div className="vir-bridge-cta__text">
-              <strong>Want to see more {collectionName} in your {brief.room.name}?</strong>
-              <span>Your room and placement carry over to the full collection.</span>
+          {/* Rendered image + edit FAB */}
+          {renderJob?.status === 'succeeded' && renderImgSrc && (
+            <>
+              <img
+                key={renderImgSrc}
+                className="vir-pdp-render__img vir-pdp-render__img--reveal"
+                src={renderImgSrc}
+                alt={`${productTitle} in ${brief.room.name}`}
+              />
+              <button className="vir-pdp-render__fab" onClick={openSetup}>✦ Edit</button>
+            </>
+          )}
+
+          {/* Failed */}
+          {renderJob?.status === 'failed' && (
+            <div className="vir-pdp-render__generating">
+              <span style={{ fontSize: 22 }}>✦</span>
+              <span>Render unavailable</span>
+              <button className="btn btn--outline btn--sm" onClick={openSetup} style={{ marginTop: 4 }}>Try again</button>
             </div>
-            <button className="vir-cta__btn" onClick={handleNavigateToCollection}>
-              Browse collection in your room →
-            </button>
-          </div>
-        </>
+          )}
+        </div>
       )}
 
       {isOpen && (

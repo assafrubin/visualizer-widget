@@ -16,7 +16,7 @@ export type PDPStore = ReturnType<typeof createPDPStore>
 export function createPDPStore(api: Api, productHandle: string, productTitle: string, shopDomain: string) {
   let state: PDPSnapshot = { brief: null, renderJob: null }
   let activeBriefId: string | null = null
-  let pollTimer: ReturnType<typeof setInterval> | null = null
+  let sseCleanup: (() => void) | null = null
 
   const listeners = new Set<() => void>()
 
@@ -33,10 +33,10 @@ export function createPDPStore(api: Api, productHandle: string, productTitle: st
     return useSyncExternalStore(subscribe, getSnapshot)
   }
 
-  async function setBrief(brief: EnhancedSceneBrief | null) {
+  async function setBrief(brief: EnhancedSceneBrief | null, timing?: { briefMs: number; t1: number }) {
     if (brief?.id === activeBriefId) return
 
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+    sseCleanup?.(); sseCleanup = null
     activeBriefId = brief?.id ?? null
     state = { brief, renderJob: null }
     notify()
@@ -51,30 +51,41 @@ export function createPDPStore(api: Api, productHandle: string, productTitle: st
     }
 
     try {
+      const submitStart = timing?.t1 ?? Date.now()
       const job = await api.createRenderJob({
         briefId: brief.id,
         productId: productHandle,
         shopDomain,
         product: { title: productTitle, material: '', cabinetColor: '' },
       })
+      const submitMs = Date.now() - submitStart
       state = { ...state, renderJob: job }
       notify()
 
+      const pollStart = Date.now()
+
+      function onSucceeded(jobId: string) {
+        if (!timing) return
+        const pollWaitMs = Date.now() - pollStart
+        const totalClientMs = timing.briefMs + submitMs + pollWaitMs
+        api.reportRenderTiming(jobId, { briefMs: timing.briefMs, submitMs, pollWaitMs, totalClientMs })
+      }
+
       if (job.status === 'succeeded') {
         renderCache.set(productHandle, brief.id, job)
+        onSucceeded(job.jobId)
       } else if (!isTerminalStatus(job.status)) {
-        pollTimer = setInterval(async () => {
-          try {
-            const updated = await api.getRenderJob(job.jobId)
-            state = { ...state, renderJob: updated }
-            notify()
-            if (isTerminalStatus(updated.status)) {
-              clearInterval(pollTimer!)
-              pollTimer = null
-              if (updated.status === 'succeeded') renderCache.set(productHandle, brief.id, updated)
+        sseCleanup = api.watchRenderJob(job.jobId, (updated) => {
+          state = { ...state, renderJob: updated }
+          notify()
+          if (isTerminalStatus(updated.status)) {
+            sseCleanup = null
+            if (updated.status === 'succeeded') {
+              renderCache.set(productHandle, brief.id, updated)
+              onSucceeded(updated.jobId)
             }
-          } catch { /* ignore */ }
-        }, 3000)
+          }
+        })
       }
     } catch (err) {
       console.error('[VIR] createRenderJob failed:', err)
@@ -82,29 +93,26 @@ export function createPDPStore(api: Api, productHandle: string, productTitle: st
   }
 
   function hydrate(brief: EnhancedSceneBrief, renderJob: RenderJob) {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+    sseCleanup?.(); sseCleanup = null
     activeBriefId = brief.id
     state = { brief, renderJob }
     notify()
     if (renderJob.status === 'succeeded') {
       renderCache.set(productHandle, brief.id, renderJob)
     } else if (!isTerminalStatus(renderJob.status)) {
-      pollTimer = setInterval(async () => {
-        try {
-          const updated = await api.getRenderJob(renderJob.jobId)
-          state = { ...state, renderJob: updated }
-          notify()
-          if (isTerminalStatus(updated.status)) {
-            clearInterval(pollTimer!); pollTimer = null
-            if (updated.status === 'succeeded') renderCache.set(productHandle, brief.id, updated)
-          }
-        } catch { /* ignore */ }
-      }, 3000)
+      sseCleanup = api.watchRenderJob(renderJob.jobId, (updated) => {
+        state = { ...state, renderJob: updated }
+        notify()
+        if (isTerminalStatus(updated.status)) {
+          sseCleanup = null
+          if (updated.status === 'succeeded') renderCache.set(productHandle, brief.id, updated)
+        }
+      })
     }
   }
 
   function clear() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+    sseCleanup?.(); sseCleanup = null
     activeBriefId = null
     state = { brief: null, renderJob: null }
     notify()

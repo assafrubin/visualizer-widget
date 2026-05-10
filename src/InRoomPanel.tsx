@@ -1,6 +1,8 @@
 import type { CollectionSceneBrief, WidgetProduct } from './types'
 import type { RenderJob } from './api'
 import { SceneBriefChips } from './setup/SceneBriefChips'
+import { useBackofficeImage } from './useBackofficeImage'
+import { LottieLoader } from './LottieLoader'
 
 interface InRoomPanelProps {
   brief: CollectionSceneBrief
@@ -13,14 +15,14 @@ interface InRoomPanelProps {
 function RenderCard({ product, job }: { product: WidgetProduct; job: RenderJob | undefined }) {
   const isLoading = !job || job.status === 'submitted' || job.status === 'processing'
   const isFailed = job?.status === 'failed'
-  const imageUrl = job?.imageUrl
+  const imgSrc = useBackofficeImage(job?.status === 'succeeded' ? job.imageUrl : null)
 
   return (
     <div className="vir-result-card">
       <div className="vir-result-card__img">
         {isLoading && (
           <div className="vir-result-card__skeleton">
-            <span className="vir-spinner" />
+            <LottieLoader size={64} />
           </div>
         )}
         {isFailed && !isLoading && (
@@ -28,8 +30,8 @@ function RenderCard({ product, job }: { product: WidgetProduct; job: RenderJob |
             <span style={{ fontSize: '20px' }}>✦</span>
           </div>
         )}
-        {imageUrl && !isLoading && (
-          <img src={imageUrl} alt={`${product.title} in room`} />
+        {imgSrc && !isLoading && (
+          <img src={imgSrc} alt={`${product.title} in room`} />
         )}
       </div>
       <div className="vir-result-card__info">
