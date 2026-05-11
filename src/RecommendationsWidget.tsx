@@ -21,16 +21,19 @@ export interface RecommendationsWidgetProps {
 
 const MAX_RECS = 10
 const EAGER_RENDER_COUNT = 4 // PDP product renders separately; fill the first visible carousel page
+const RENDER_TIMEOUT_MS = 45_000
 
-function RecCard({ product, job, brief, roomBadge, backofficeUrl, shopDomain }: {
+function RecCard({ product, job, brief, timedOut, onRetry, roomBadge, backofficeUrl, shopDomain }: {
   product: WidgetProduct
   job: RenderJob | undefined
   brief: import('./types').CollectionSceneBrief | null
+  timedOut: boolean
+  onRetry: () => void
   roomBadge: string
   backofficeUrl: string
   shopDomain: string
 }) {
-  const isRendering = !!brief && (!job || job.status === 'submitted' || job.status === 'processing')
+  const isRendering = !!brief && (!job || job.status === 'submitted' || job.status === 'processing') && !timedOut
   const renderImgSrc = useBackofficeImage(job?.status === 'succeeded' ? job.imageUrl : null)
   const viewTrackedForJob = useRef<string | null>(null)
 
@@ -70,6 +73,18 @@ function RecCard({ product, job, brief, roomBadge, backofficeUrl, shopDomain }: 
             <LottieLoader size={72} />
           </div>
         )}
+        {timedOut && (
+          <div className="vir-rec__render-overlay vir-rec__render-overlay--timeout">
+            <span>Having difficulties</span>
+            <button
+              className="btn btn--sm"
+              style={{ fontSize: 11, marginTop: 4 }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRetry() }}
+            >
+              Try again
+            </button>
+          </div>
+        )}
         {renderImgSrc && (
           <span className="vir-rec__room-badge">✦ {roomBadge}</span>
         )}
@@ -87,6 +102,7 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
 
   const [products, setProducts] = useState<WidgetProduct[]>([])
   const [renderJobs, setRenderJobs] = useState<Map<string, RenderJob>>(new Map())
+  const [timedOutProducts, setTimedOutProducts] = useState<Set<string>>(new Set())
   const [loadingProducts, setLoadingProducts] = useState(true)
 
   const stripRef = useRef<HTMLDivElement>(null)
@@ -94,6 +110,23 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
   const renderedForBrief = useRef<{ briefId: string; started: Set<string> } | null>(null)
   // SSE cleanup functions keyed by productId
   const sseCleanups = useRef<Map<string, () => void>>(new Map())
+  // Timeout timers keyed by productId
+  const renderTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  function startProductTimer(productId: string) {
+    const existing = renderTimers.current.get(productId)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      setTimedOutProducts(prev => new Set(prev).add(productId))
+    }, RENDER_TIMEOUT_MS)
+    renderTimers.current.set(productId, timer)
+  }
+
+  function clearProductTimer(productId: string) {
+    const timer = renderTimers.current.get(productId)
+    if (timer) { clearTimeout(timer); renderTimers.current.delete(productId) }
+    setTimedOutProducts(prev => { const next = new Set(prev); next.delete(productId); return next })
+  }
 
   // ── Load collection products, excluding current product ───────────────────
   useEffect(() => {
@@ -116,15 +149,20 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
   useEffect(() => {
     sseCleanups.current.forEach(cleanup => cleanup())
     sseCleanups.current.clear()
+    renderTimers.current.forEach(clearTimeout)
+    renderTimers.current.clear()
     setRenderJobs(new Map())
+    setTimedOutProducts(new Set())
     renderedForBrief.current = null
     return () => {
       sseCleanups.current.forEach(cleanup => cleanup())
       sseCleanups.current.clear()
+      renderTimers.current.forEach(clearTimeout)
+      renderTimers.current.clear()
     }
   }, [brief?.id])
 
-  // ── Kick off render for a product (called by IntersectionObserver) ────────
+  // ── Kick off render for a product (called by IntersectionObserver + retry) ─
   const startRender = useCallback(async (product: WidgetProduct) => {
     if (!brief) return
     const tracker = renderedForBrief.current
@@ -156,10 +194,14 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
       if (job.status === 'succeeded') {
         renderCache.set(product.id, brief.id, job)
       } else if (!isTerminalStatus(job.status)) {
+        startProductTimer(product.id)
         const cleanup = api.watchRenderJob(job.jobId, (updated) => {
           setRenderJobs(prev => new Map(prev).set(product.id, updated))
-          if (updated.status === 'succeeded' && brief) renderCache.set(product.id, brief.id, updated)
-          if (isTerminalStatus(updated.status)) sseCleanups.current.delete(product.id)
+          if (isTerminalStatus(updated.status)) {
+            clearProductTimer(product.id)
+            if (updated.status === 'succeeded' && brief) renderCache.set(product.id, brief.id, updated)
+            sseCleanups.current.delete(product.id)
+          }
         })
         sseCleanups.current.set(product.id, cleanup)
       }
@@ -174,8 +216,21 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
     }
   }, [brief, api, shopDomain])
 
+  // ── Retry a timed-out product render ──────────────────────────────────────
+  const retryRender = useCallback((product: WidgetProduct) => {
+    if (!brief) return
+    // Clear timeout state and any active watcher
+    clearProductTimer(product.id)
+    sseCleanups.current.get(product.id)?.()
+    sseCleanups.current.delete(product.id)
+    // Allow re-submission for this product
+    renderedForBrief.current?.started.delete(product.id)
+    setRenderJobs(prev => { const next = new Map(prev); next.delete(product.id); return next })
+    startRender(product)
+  }, [brief, startRender])
+
   // ── Eager batch renders for the first visible page ────────────────────────
-  // Submits all eager products in a single batchGenerateContent call (50% cheaper).
+  // Submits all eager products in a single batch call.
   // Products beyond EAGER_RENDER_COUNT fall through to the IntersectionObserver.
   useEffect(() => {
     if (!brief || !products.length) return
@@ -210,10 +265,14 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
         if (job.status === 'succeeded') {
           renderCache.set(productId, currentBrief.id, job)
         } else if (!isTerminalStatus(job.status)) {
+          startProductTimer(productId)
           const cleanup = api.watchRenderJob(job.jobId, updated => {
             setRenderJobs(prev => new Map(prev).set(productId, updated))
-            if (updated.status === 'succeeded') renderCache.set(productId, currentBrief.id, updated)
-            if (isTerminalStatus(updated.status)) sseCleanups.current.delete(productId)
+            if (isTerminalStatus(updated.status)) {
+              clearProductTimer(productId)
+              if (updated.status === 'succeeded') renderCache.set(productId, currentBrief.id, updated)
+              sseCleanups.current.delete(productId)
+            }
           })
           sseCleanups.current.set(productId, cleanup)
         }
@@ -255,8 +314,8 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
   }
 
   // Hide products whose render job failed (e.g. no cutout available) — show only
-  // products that are pending, in-flight, or successfully rendered.
-  const visibleProducts = products.filter(p => renderJobs.get(p.id)?.status !== 'failed')
+  // products that are pending, in-flight, timed-out, or successfully rendered.
+  const visibleProducts = products.filter(p => renderJobs.get(p.id)?.status !== 'failed' || timedOutProducts.has(p.id))
 
   if (loadingProducts || visibleProducts.length === 0 || !brief) return null
 
@@ -288,6 +347,8 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
               product={product}
               job={renderJobs.get(product.id)}
               brief={brief}
+              timedOut={timedOutProducts.has(product.id)}
+              onRetry={() => retryRender(product)}
               roomBadge={appearance.recsRoomBadge}
               backofficeUrl={backofficeUrl}
               shopDomain={shopDomain}

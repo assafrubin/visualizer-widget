@@ -25,7 +25,7 @@ export interface PDPWidgetProps {
 }
 
 export function PDPWidget({ api, store, collectionName, productHandle, productTitle, productCategory, backofficeUrl, shopDomain, appearance = DEFAULT_APPEARANCE }: PDPWidgetProps) {
-  const { brief, renderJob } = store.usePDPStore()
+  const { brief, renderJob, renderTimedOut } = store.usePDPStore()
   const renderImgSrc = useBackofficeImage(renderJob?.status === 'succeeded' ? renderJob.imageUrl : null)
   const viewTrackedForJob = useRef<string | null>(null)
 
@@ -90,10 +90,19 @@ export function PDPWidget({ api, store, collectionName, productHandle, productTi
           <button className="vir-pdp-render__close" onClick={store.clear} aria-label="Remove render">✕</button>
 
           {/* Generating */}
-          {(!renderJob || renderJob.status === 'submitted' || renderJob.status === 'processing') && (
+          {(!renderJob || renderJob.status === 'submitted' || renderJob.status === 'processing') && !renderTimedOut && (
             <div className="vir-pdp-render__generating">
               <LottieLoader size={120} />
               <span>Generating your room view…</span>
+            </div>
+          )}
+
+          {/* Timed out */}
+          {renderTimedOut && (
+            <div className="vir-pdp-render__generating">
+              <span style={{ fontSize: 22 }}>✦</span>
+              <span>Having difficulties — please try again.</span>
+              <button className="btn btn--outline btn--sm" onClick={store.retryRender} style={{ marginTop: 4 }}>Try again</button>
             </div>
           )}
 
@@ -110,8 +119,8 @@ export function PDPWidget({ api, store, collectionName, productHandle, productTi
             </>
           )}
 
-          {/* Failed */}
-          {renderJob?.status === 'failed' && (
+          {/* Failed (provider error, not timeout) */}
+          {renderJob?.status === 'failed' && !renderTimedOut && (
             <div className="vir-pdp-render__generating">
               <span style={{ fontSize: 22 }}>✦</span>
               <span>Render unavailable</span>

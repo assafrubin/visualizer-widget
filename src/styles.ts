@@ -501,6 +501,11 @@ export const WIDGET_CSS = `
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(255,255,255,0.6); backdrop-filter: blur(2px);
 }
+.vir-widget .vir-rec__render-overlay--timeout {
+  flex-direction: column; gap: 4px;
+  background: rgba(0,0,0,0.55); color: #fff;
+  font-size: 11px; text-align: center; padding: 8px;
+}
 .vir-widget .vir-rec__room-badge {
   position: absolute; bottom: 6px; left: 6px;
   background: rgba(255,255,255,0.92); color: var(--vir-accent);
