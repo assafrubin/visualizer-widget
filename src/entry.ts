@@ -94,6 +94,34 @@ function mount(container: HTMLElement, element: React.ReactElement) {
   createRoot(container).render(createElement(StrictMode, null, element))
 }
 
+type InjectionPosition = 'before' | 'after' | 'inside'
+
+function insertAt(target: HTMLElement, container: HTMLElement, position: InjectionPosition) {
+  if (position === 'before') target.insertAdjacentElement('beforebegin', container)
+  else if (position === 'inside') target.appendChild(container)
+  else target.insertAdjacentElement('afterend', container)
+}
+
+function mountRecsContainer(container: HTMLElement, appearance: import('./api').AppearanceSettings) {
+  // Priority 1: [data-vir-rec-target] element in the DOM (merchant marks it in Liquid, always afterend)
+  const domTarget = document.querySelector<HTMLElement>('[data-vir-rec-target]')
+  if (domTarget) { insertAt(domTarget, container, 'after'); return }
+
+  // Priority 2: backoffice appearance setting (CSS selector + position)
+  if (appearance.recsInjectionSelector) {
+    const el = document.querySelector<HTMLElement>(appearance.recsInjectionSelector)
+    if (el) { insertAt(el, container, appearance.recsInjectionPosition ?? 'after'); return }
+    console.warn(`[VIR] recsInjectionSelector "${appearance.recsInjectionSelector}" matched nothing — falling back to auto-detection`)
+  }
+
+  // Priority 3: auto-detection
+  const related = document.querySelector<HTMLElement>('.product-recommendations, .related-products')
+  const mainEl = document.querySelector<HTMLElement>('main, [role="main"], #MainContent')
+  if (related) related.insertAdjacentElement('afterend', container)
+  else if (mainEl) mainEl.appendChild(container)
+  else document.body.appendChild(container)
+}
+
 async function init() {
   const backofficeUrl = currentScript?.dataset.backofficeUrl ?? ''
   const shopDomain = currentScript?.dataset.shopDomain ?? window.location.hostname
@@ -187,19 +215,7 @@ async function init() {
 
     if (config.pdpRecommendationsEnabled) {
       const container = document.createElement('div')
-      // Insert AFTER Shopify's related-products section so VIR appears below it,
-      // not before it (which would put it above the fold and invisible on scroll-down).
-      const related = document.querySelector<HTMLElement>(
-        '[data-vir-rec-target], .product-recommendations, .related-products'
-      )
-      const mainEl = document.querySelector<HTMLElement>('main, [role="main"], #MainContent')
-      if (related) {
-        related.insertAdjacentElement('afterend', container)
-      } else if (mainEl) {
-        mainEl.appendChild(container)
-      } else {
-        document.body.appendChild(container)
-      }
+      mountRecsContainer(container, appearance)
       mount(container, createElement(RecommendationsWidget, {
         api, store, productHandle, collectionHandle, shopDomain, backofficeUrl, collectionName: collectionName ?? collectionHandle, appearance,
       }))

@@ -11,6 +11,8 @@ export interface AppearanceSettings {
   pdpCtaButton: string
   recsTitle: string
   recsRoomBadge: string
+  recsInjectionSelector?: string
+  recsInjectionPosition?: 'before' | 'after' | 'inside'
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
