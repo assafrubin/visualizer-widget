@@ -91,6 +91,10 @@ export function createApi(baseUrl: string) {
       req<{ job: RenderJob }>('/render-jobs', { method: 'POST', body: JSON.stringify(body) })
         .then(r => resolveJob(r.job)),
 
+    createBatchRenderJobs: (body: { briefId: string; shopDomain?: string; products: Array<{ productId: string; product: { title: string; material: string; cabinetColor: string } }> }) =>
+      req<{ jobs: Array<{ productId: string; job: RenderJob }> }>('/render-jobs/batch', { method: 'POST', body: JSON.stringify(body) })
+        .then(r => r.jobs.map(({ productId, job }) => ({ productId, job: resolveJob(job) }))),
+
     getRenderJob: (jobId: string) =>
       req<{ job: RenderJob }>(`/render-jobs/${jobId}`).then(r => resolveJob(r.job)),
 

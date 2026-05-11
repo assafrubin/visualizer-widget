@@ -174,14 +174,58 @@ export function RecommendationsWidget({ api, store, productHandle, collectionHan
     }
   }, [brief, api, shopDomain])
 
-  // ── Eager parallel renders for the first visible page ────────────────────
-  // All jobs share the room photo via Gemini Files API URI so N renders cost
-  // the same transfer as 1 and complete in parallel (~17s total, not 17s × N).
+  // ── Eager batch renders for the first visible page ────────────────────────
+  // Submits all eager products in a single batchGenerateContent call (50% cheaper).
   // Products beyond EAGER_RENDER_COUNT fall through to the IntersectionObserver.
   useEffect(() => {
     if (!brief || !products.length) return
-    products.slice(0, EAGER_RENDER_COUNT).forEach(product => startRender(product))
-  }, [brief?.id, products, startRender])
+    const currentBrief = brief
+
+    const toRender = products.slice(0, EAGER_RENDER_COUNT).filter(p => {
+      if (renderedForBrief.current?.briefId === currentBrief.id && renderedForBrief.current.started.has(p.id)) return false
+      const cached = renderCache.get(p.id, currentBrief.id)
+      if (cached) { setRenderJobs(prev => new Map(prev).set(p.id, cached)); return false }
+      return true
+    })
+    if (!toRender.length) return
+
+    if (!renderedForBrief.current || renderedForBrief.current.briefId !== currentBrief.id) {
+      renderedForBrief.current = { briefId: currentBrief.id, started: new Set() }
+    }
+    toRender.forEach(p => renderedForBrief.current!.started.add(p.id))
+
+    setRenderJobs(prev => {
+      const next = new Map(prev)
+      toRender.forEach(p => next.set(p.id, { jobId: '', briefId: currentBrief.id, status: 'submitted', imageUrl: null, error: null }))
+      return next
+    })
+
+    api.createBatchRenderJobs({
+      briefId: currentBrief.id,
+      shopDomain,
+      products: toRender.map(p => ({ productId: p.id, product: { title: p.title, material: p.material, cabinetColor: '' } })),
+    }).then(results => {
+      results.forEach(({ productId, job }) => {
+        setRenderJobs(prev => new Map(prev).set(productId, job))
+        if (job.status === 'succeeded') {
+          renderCache.set(productId, currentBrief.id, job)
+        } else if (!isTerminalStatus(job.status)) {
+          const cleanup = api.watchRenderJob(job.jobId, updated => {
+            setRenderJobs(prev => new Map(prev).set(productId, updated))
+            if (updated.status === 'succeeded') renderCache.set(productId, currentBrief.id, updated)
+            if (isTerminalStatus(updated.status)) sseCleanups.current.delete(productId)
+          })
+          sseCleanups.current.set(productId, cleanup)
+        }
+      })
+    }).catch(err => {
+      console.error('[VIR/Rec] createBatchRenderJobs failed:', err)
+      toRender.forEach(p => {
+        renderedForBrief.current?.started.delete(p.id)
+        setRenderJobs(prev => { const next = new Map(prev); next.delete(p.id); return next })
+      })
+    })
+  }, [brief?.id, products, api, shopDomain])
 
   // ── IntersectionObserver: lazy render for products beyond the eager page ──
   useEffect(() => {
